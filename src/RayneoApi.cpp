@@ -338,10 +338,18 @@ static bool macEnsureDeviceSelected(RayneoContext__ *ctx)
     if (!set)
         return false;
     CFIndex count = CFSetGetCount(set);
-    std::vector<IOHIDDeviceRef> devices(static_cast<size_t>(count));
-    CFSetGetValues(set, reinterpret_cast<const void **>(devices.data()));
-    for (auto dev : devices)
+    // CFSetGetValues expects an array of const void*. Casting directly from
+    // IOHIDDeviceRef* to const void** is rejected by Clang due to qualifier loss.
+    // Use an intermediate buffer of CFTypeRef (alias of const void*) then cast
+    // each element to IOHIDDeviceRef.
+    std::vector<CFTypeRef> raw(static_cast<size_t>(count));
+    if (count > 0)
+        CFSetGetValues(set, raw.data());
+    for (auto entry : raw)
     {
+        IOHIDDeviceRef dev = static_cast<IOHIDDeviceRef>(entry);
+        if (!dev)
+            continue;
         int vid = macGetDeviceInt(dev, CFSTR(kIOHIDVendorIDKey));
         int pid = macGetDeviceInt(dev, CFSTR(kIOHIDProductIDKey));
         if (vid == ctx->vid && pid == ctx->pid)

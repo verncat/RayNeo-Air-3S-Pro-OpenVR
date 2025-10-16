@@ -37,8 +37,8 @@ jobs:
         if: startsWith(matrix.os, 'windows')
         run: |
           git clone https://github.com/microsoft/vcpkg.git "$env:VCPKG_ROOT"
-          $env:VCPKG_ROOT/bootstrap-vcpkg.bat
-          echo "VCPKG_INSTALLED_DIR=$env:VCPKG_ROOT/installed" >> $env:GITHUB_ENV
+          $env:VCPKG_ROOT\bootstrap-vcpkg.bat
+          echo "VCPKG_INSTALLED_DIR=$env:VCPKG_ROOT\installed" >> $env:GITHUB_ENV
         shell: pwsh
 
       - name: Install dependencies (Windows)
