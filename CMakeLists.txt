@@ -46,6 +46,7 @@ endif()
 
 # Provide a unified interface target that downstream code can link against
 add_library(LibUsb INTERFACE)
+add_library(RayNeo::LibUsb ALIAS LibUsb)
 
 if (TARGET PkgConfig::libusb)
     # pkg-config found: reuse its imported target and propagate its compile flags
@@ -90,7 +91,7 @@ if (NOT APPLE)
         endif()
     else()
         # On Linux we usually rely on system loader; attempt to find .so for optional copy.
-        get_target_property(_rayneo_libusb_lib RayNeo::LibUsb INTERFACE_LINK_LIBRARIES)
+    get_target_property(_rayneo_libusb_lib LibUsb INTERFACE_LINK_LIBRARIES)
         # _rayneo_libusb_lib may list several; attempt to locate a libusb shared object hint.
         foreach(lib IN LISTS _rayneo_libusb_lib)
             if (lib MATCHES "libusb" AND EXISTS "${lib}")
@@ -104,7 +105,10 @@ if (NOT APPLE)
     endif()
 endif()
 
-add_library(RayNeo::LibUsb ALIAS LibUsb)
+# OpenGL policy to prefer GLVND when available (silences warning)
+if (POLICY CMP0072)
+    cmake_policy(SET CMP0072 NEW)
+endif()
 
 # Platform-specific dependencies ----------------------------------------------
 if (APPLE)

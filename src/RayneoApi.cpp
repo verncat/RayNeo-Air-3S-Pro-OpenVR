@@ -338,16 +338,17 @@ static bool macEnsureDeviceSelected(RayneoContext__ *ctx)
     if (!set)
         return false;
     CFIndex count = CFSetGetCount(set);
-    // CFSetGetValues expects an array of const void*. Casting directly from
-    // IOHIDDeviceRef* to const void** is rejected by Clang due to qualifier loss.
-    // Use an intermediate buffer of CFTypeRef (alias of const void*) then cast
-    // each element to IOHIDDeviceRef.
-    std::vector<CFTypeRef> raw(static_cast<size_t>(count));
+    // CFSetGetValues fills an array of const void* values. We store them as such
+    // then cast to IOHIDDeviceRef (opaque pointer) for inspection. Removing const
+    // is safe: we do not mutate device objects here, only read properties.
+    std::vector<const void *> raw(static_cast<size_t>(count));
     if (count > 0)
         CFSetGetValues(set, raw.data());
-    for (auto entry : raw)
+    for (const void *entry : raw)
     {
-        IOHIDDeviceRef dev = static_cast<IOHIDDeviceRef>(entry);
+        // Convert const void* from CFSet to IOHIDDeviceRef without triggering
+        // qualifier warnings: IOHIDDeviceRef is an opaque pointer typedef.
+        IOHIDDeviceRef dev = reinterpret_cast<IOHIDDeviceRef>(const_cast<void *>(entry));
         if (!dev)
             continue;
         int vid = macGetDeviceInt(dev, CFSTR(kIOHIDVendorIDKey));
