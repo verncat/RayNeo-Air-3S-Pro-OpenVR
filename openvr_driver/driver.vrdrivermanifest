@@ -1,0 +1,10 @@
+{
+	"alwaysActivate": true,
+	"name" : "rayneo",
+	"directory" : "",
+	"resourceOnly" : false,
+	"hmd_presence" :
+	[
+		"*.*"
+	]
+}
