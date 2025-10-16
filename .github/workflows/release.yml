@@ -1,0 +1,123 @@
+name: Build & Release RayNeo SDK
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to create releases
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        build_type: [RelWithDebInfo]
+    env:
+      VCPKG_DEFAULT_TRIPLET: x64-windows
+      CMAKE_BUILD_TYPE: ${{ matrix.build_type }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup vcpkg (Windows only)
+        if: startsWith(matrix.os, 'windows')
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+        # Using setup-node to ensure Git is modern; vcpkg bootstrap uses Git.
+      - name: Bootstrap vcpkg (Windows)
+        if: startsWith(matrix.os, 'windows')
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git "$env:VCPKG_ROOT"
+          $env:VCPKG_ROOT/bootstrap-vcpkg.bat
+          echo "VCPKG_INSTALLED_DIR=$env:VCPKG_ROOT/installed" >> $env:GITHUB_ENV
+        shell: pwsh
+
+      - name: Install dependencies (Windows)
+        if: startsWith(matrix.os, 'windows')
+        run: |
+          $env:VCPKG_ROOT/vcpkg.exe install libusb[core]:x64-windows sdl2[sdl2main]:x64-windows sdl2-ttf:x64-windows
+        shell: pwsh
+
+      - name: Install dependencies (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libusb-1.0-0-dev libsdl2-dev libsdl2-ttf-dev libgl1-mesa-dev
+
+      - name: Install dependencies (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew update
+          brew install libusb sdl2 sdl2_ttf
+
+      - name: Configure CMake
+        run: |
+          cmake -B build -DRAYNEO_BUILD_EXAMPLES=ON -DRAYNEO_BUILD_OPENVR_DRIVER=OFF ${{ startsWith(matrix.os, 'windows') && '-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake' || '' }}
+        shell: bash
+
+      - name: Build
+        run: |
+          cmake --build build --config ${{ matrix.build_type }} --target RayNeoSDK
+          cmake --build build --config ${{ matrix.build_type }} --target RayNeoExample || true
+          cmake --build build --config ${{ matrix.build_type }} --target RayNeoOrientationDemo || true
+        shell: bash
+
+      - name: Package artifacts
+        run: |
+          mkdir -p package/include package/bin package/examples
+          cp -R include/rayneo package/include/
+          # Copy library
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cp build/${{ matrix.build_type }}/RayNeoSDK.dll package/bin/ || true
+            cp build/${{ matrix.build_type }}/RayNeoSDK.lib package/bin/ || true
+          elif [ "${{ matrix.os }}" = "macos-latest" ]; then
+            cp build/RayNeoSDK.dylib package/bin/ || true
+          else
+            cp build/libRayNeoSDK.so package/bin/ || true
+          fi
+          # Copy examples if built
+          cp build/examples/simple/${{ matrix.build_type }}/* package/examples/ 2>/dev/null || true
+          cp build/examples/orientation_demo/${{ matrix.build_type }}/* package/examples/ 2>/dev/null || true
+          tar -czf rayneo-sdk-${{ matrix.os }}.tar.gz package
+        shell: bash
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rayneo-sdk-${{ matrix.os }}
+          path: rayneo-sdk-${{ matrix.os }}.tar.gz
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Generate Release Notes
+        id: notes
+        run: |
+          echo "release_body<<EOF" >> $GITHUB_OUTPUT
+          echo "RayNeo SDK release for tag $GITHUB_REF_NAME" >> $GITHUB_OUTPUT
+          echo "Includes prebuilt binaries for Windows, macOS, and Linux." >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: RayNeo SDK ${{ github.ref_name }}
+          body: ${{ steps.notes.outputs.release_body }}
+          files: dist/*/*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
