@@ -2,6 +2,11 @@
 
 SDL2 + OpenGL program that visualizes orientation / IMU stream from the RayNeo device.
 
+
+<div align="center">
+  <img src="images/image.png" alt="RayNeo Air3s Pro" style="max-width: 400px;width:100%;">
+</div>
+
 ## Target
 CMake target: `RayNeoOrientationDemo`
 Output binary (multi-config): `build/examples/orientation_demo/<Config>/RayNeoOrientationDemo[.exe]`

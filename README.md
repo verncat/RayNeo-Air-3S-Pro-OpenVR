@@ -1,6 +1,12 @@
 # RayNeo SDK (Work-in-Progress)
 
-A lightweight C/C++ SDK and examples for interacting with **RayNeo Air3s Pro** (and probably other RayNeo's) devices. The project currently focuses on:
+A lightweight C/C++ SDK and examples for interacting with **RayNeo Air3s Pro** (and probably other RayNeo's) devices. 
+
+<div align="center">
+  <img src="images/tcl-rayneo-air3s-pro.png" alt="RayNeo Air3s Pro" style="max-width: 400px;width:100%;">
+</div>
+
+The project currently focuses on:
 
 - Cross-platform transport layer
   - libusb on Windows/Linux
