@@ -3,7 +3,7 @@
 A lightweight C/C++ SDK and examples for interacting with **RayNeo Air3s Pro** (and probably other RayNeo's) devices. 
 
 <div align="center">
-  <img src="images/tcl-rayneo-air3s-pro.png" alt="RayNeo Air3s Pro" style="max-width: 400px;width:100%;">
+  <img src="images/tcl-rayneo-air3s-pro.png" alt="RayNeo Air3s Pro" width="400px">
 </div>
 
 The project currently focuses on:
