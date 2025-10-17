@@ -27,3 +27,10 @@ target_link_libraries(RayNeoOrientationDemo PRIVATE
 
 # Windows runtime deployment --------------------------------------------------
 rayneo_deploy_runtime(RayNeoOrientationDemo)
+
+# RPATH so the executable finds libRayNeoSDK when in same directory
+if (APPLE)
+    set_target_properties(RayNeoOrientationDemo PROPERTIES BUILD_RPATH "@loader_path" INSTALL_RPATH "@loader_path")
+else()
+    set_target_properties(RayNeoOrientationDemo PROPERTIES BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN")
+endif()

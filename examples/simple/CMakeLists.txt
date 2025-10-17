@@ -22,3 +22,10 @@ endif()
 
 # Post-build deployment helpers (Windows) -------------------------------------
 rayneo_deploy_runtime(RayNeoExample)
+
+# RPATH so the executable finds libRayNeoSDK when in same directory
+if (APPLE)
+    set_target_properties(RayNeoExample PROPERTIES BUILD_RPATH "@loader_path" INSTALL_RPATH "@loader_path")
+else()
+    set_target_properties(RayNeoExample PROPERTIES BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN")
+endif()

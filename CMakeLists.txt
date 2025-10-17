@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.16)
 
 project(RayNeo VERSION 1.0 LANGUAGES C CXX)
 
+# Enable modern RPATH behavior on macOS
+set(CMAKE_MACOSX_RPATH ON)
+
 # User-facing build toggles ---------------------------------------------------
 option(RAYNEO_BUILD_OPENVR_DRIVER "Build the OpenVR stub driver" ON)
 option(RAYNEO_BUILD_EXAMPLES "Build example applications" ON)
@@ -132,6 +135,23 @@ target_link_libraries(RayNeoSDK
     PRIVATE
         RayNeo::LibUsb
         ${RAYNEO_PLATFORM_LIBS}
+)
+
+# ----------------------------------------------------------------------------
+# RPATH Setup: ensure executables and the SDK can locate libRayNeoSDK.* when
+# placed side-by-side (CI packaging strategy). We set BUILD_RPATH so running
+# from build tree works, and INSTALL_RPATH for later installation or archives.
+# Linux: use $ORIGIN ; macOS: use @loader_path
+# ----------------------------------------------------------------------------
+if (APPLE)
+    set(_RAYNEO_RPATH "@loader_path")
+else()
+    set(_RAYNEO_RPATH "$ORIGIN")
+endif()
+
+set_target_properties(RayNeoSDK PROPERTIES
+    BUILD_RPATH "${_RAYNEO_RPATH}"
+    INSTALL_RPATH "${_RAYNEO_RPATH}"
 )
 
 if (WIN32)
