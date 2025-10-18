@@ -11,6 +11,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#include <cstdarg>
 
 #ifdef __APPLE__
 #include <IOKit/hid/IOHIDManager.h>
@@ -18,6 +19,13 @@
 #include <CoreFoundation/CoreFoundation.h>
 #else
 #include <libusb.h>
+#endif
+
+#ifndef __APPLE__
+static const char *rayneoUsbErr(int code)
+{
+    return libusb_error_name(code);
+}
 #endif
 
 struct RayneoContext__
@@ -42,8 +50,10 @@ struct RayneoContext__
     libusb_context *usbCtx{nullptr};
     libusb_device_handle *handle{nullptr};
     int interfaceNumber{-1};
+    int altSetting{-1};
     uint8_t epIn{0};
     uint8_t epOut{0};
+    uint16_t epInMaxPacket{64};
     bool hasInterrupt{false};
     // async interrupt transfer state
     libusb_transfer *inTransfer{nullptr};
@@ -94,7 +104,9 @@ static void processInboundFrame(RayneoContext__ *ctx, const uint8_t *buf, size_t
     if (!ctx || !buf || len < 2)
         return;
     if (len < 64 || buf[0] != 0x99)
+    {
         return;
+    }
 
     uint8_t type = buf[1];
     ctx->lastType.store(type);
@@ -668,6 +680,7 @@ RAYNEO_Result Rayneo_Start(RAYNEO_Context ctx, uint32_t /*serviceFlags*/)
     }
     if (!target)
     {
+        // target not found
         libusb_free_device_list(list, 1);
         ctx->running.store(false);
         return RAYNEO_ERR_NO_DEVICE;
@@ -689,18 +702,27 @@ RAYNEO_Result Rayneo_Start(RAYNEO_Context ctx, uint32_t /*serviceFlags*/)
             for (int a = 0; a < iface.num_altsetting && ctx->interfaceNumber < 0; a++)
             {
                 const libusb_interface_descriptor &id = iface.altsetting[a];
+                // Prefer HID class (0x03); if not found we will still pick first available
                 if (id.bInterfaceClass == 0x03 || ctx->interfaceNumber < 0)
                 {
                     ctx->interfaceNumber = id.bInterfaceNumber;
+                    ctx->altSetting = id.bAlternateSetting;
                     for (uint8_t e = 0; e < id.bNumEndpoints; e++)
                     {
-                        auto &ep = id.endpoint[e];
-                        if ((ep.bEndpointAddress & 0x80) && (ep.bmAttributes & 0x3) == 3)
-                            ctx->epIn = ep.bEndpointAddress;
-                        if (!(ep.bEndpointAddress & 0x80) && (ep.bmAttributes & 0x3) == 3)
-                            ctx->epOut = ep.bEndpointAddress;
+                        const libusb_endpoint_descriptor &epd = id.endpoint[e];
+                        if ((epd.bmAttributes & 0x3) == 3) // interrupt
+                        {
+                            if (epd.bEndpointAddress & 0x80)
+                            {
+                                ctx->epIn = epd.bEndpointAddress;
+                                ctx->epInMaxPacket = epd.wMaxPacketSize;
+                            }
+                            else
+                                ctx->epOut = epd.bEndpointAddress;
+                        }
                     }
                     ctx->hasInterrupt = (ctx->epIn || ctx->epOut);
+                    // interface selected
                 }
             }
         }
@@ -708,7 +730,19 @@ RAYNEO_Result Rayneo_Start(RAYNEO_Context ctx, uint32_t /*serviceFlags*/)
     }
     if (ctx->interfaceNumber >= 0)
     {
-        libusb_claim_interface(ctx->handle, ctx->interfaceNumber);
+        libusb_set_auto_detach_kernel_driver(ctx->handle, 1);
+        
+        int active = libusb_kernel_driver_active(ctx->handle, ctx->interfaceNumber);
+        if (active == 1)
+        {
+            libusb_detach_kernel_driver(ctx->handle, ctx->interfaceNumber);
+        }
+        
+        int cRc = libusb_claim_interface(ctx->handle, ctx->interfaceNumber);
+        if (cRc == 0 && ctx->altSetting >= 0)
+        {
+            libusb_set_interface_alt_setting(ctx->handle, ctx->interfaceNumber, ctx->altSetting);
+        }
     }
 #else
     ctx->macReady = false;
@@ -763,54 +797,54 @@ RAYNEO_Result Rayneo_Start(RAYNEO_Context ctx, uint32_t /*serviceFlags*/)
                 ctx->transferDone.store(true);
                 return;
             }
-            if (tr->status == LIBUSB_TRANSFER_COMPLETED && tr->actual_length >= 64)
+            
+            if (tr->status == LIBUSB_TRANSFER_COMPLETED)
             {
-                const uint8_t *buf = tr->buffer;
-                processInboundFrame(ctx, buf, static_cast<size_t>(tr->actual_length));
-            }
-            ctx->transferDone.store(true);
-            if (!ctx->stopWorker.load())
-            {
-                // resubmit for continuous streaming
-                if (ctx->transferResubmit.load())
+                if (tr->actual_length >= 2)
                 {
-                    ctx->transferDone.store(false);
-                    int r = libusb_submit_transfer(tr);
-                    if (r == 0)
-                        return; // continue
+                    // Show first bytes even if <64 to debug filtering
+                    
+                }
+                if (tr->actual_length >= 64)
+                {
+                    processInboundFrame(ctx, tr->buffer, static_cast<size_t>(tr->actual_length));
                 }
             }
+            ctx->transferDone.store(true);
+            if (!ctx->stopWorker.load() && ctx->transferResubmit.load())
+            {
+                ctx->transferDone.store(false);
+                int r = libusb_submit_transfer(tr);
+                
+            }
         };
-        std::vector<uint8_t> *bufferHolder = new std::vector<uint8_t>(64); // will leak if not cleaned on exit, manage on stop
-        libusb_fill_interrupt_transfer(ctx->inTransfer, ctx->handle, ctx->epIn, bufferHolder->data(), 64, transferCallback, ctx, 0);
+        size_t inSize = ctx->epInMaxPacket ? ctx->epInMaxPacket : 64;
+        if (inSize < 64) inSize = 64;
+        std::vector<uint8_t> *bufferHolder = new std::vector<uint8_t>(inSize); // freed on worker exit
+        libusb_fill_interrupt_transfer(ctx->inTransfer, ctx->handle, ctx->epIn, bufferHolder->data(), (int)inSize, transferCallback, ctx, 0);
         ctx->transferActive.store(true);
         ctx->transferDone.store(false);
         ctx->transferResubmit.store(true);
-        libusb_submit_transfer(ctx->inTransfer);
+        int submitRc = libusb_submit_transfer(ctx->inTransfer);
+        (void)submitRc;
         ctx->worker = std::thread([ctx, bufferHolder]
-                                  {
-                                      const bool debugFrames = (std::getenv("RAYNEO_DEBUG_FRAMES") != nullptr);
-                                      while (!ctx->stopWorker.load())
-                                      {
-                                          timeval tv{0, 100000}; // 100ms
-                                          libusb_handle_events_timeout_completed(ctx->usbCtx, &tv, nullptr);
-                                      }
-                                      // cancel transfer
-                                      ctx->transferResubmit.store(false);
-                                      if (ctx->inTransfer && ctx->transferActive.load())
-                                      {
-                                          libusb_cancel_transfer(ctx->inTransfer);
-                                          // wait for callback to mark done
-                                          for (int i = 0; i < 50 && !ctx->transferDone.load(); ++i)
-                                          {
-                                              timeval tv{0, 20000};
-                                              libusb_handle_events_timeout_completed(ctx->usbCtx, &tv, nullptr);
-                                          }
-                                      }
-                                      if (debugFrames)
-                                          std::fprintf(stderr, "[RayNeoSDK] worker exiting loop (async)\n");
-                                      delete bufferHolder; // free buffer
-                                  });
+        {
+            while (!ctx->stopWorker.load())
+            {
+                timeval tv{0, 100000}; // 100ms
+                libusb_handle_events_timeout_completed(ctx->usbCtx, &tv, nullptr);
+            }
+            ctx->transferResubmit.store(false);
+            if (ctx->inTransfer && ctx->transferActive.load())
+            {
+                for (int i = 0; i < 50 && !ctx->transferDone.load(); ++i)
+                {
+                    timeval tv{0, 20000};
+                    libusb_handle_events_timeout_completed(ctx->usbCtx, &tv, nullptr);
+                }
+            }
+            delete bufferHolder;
+        });
     }
 #endif
     return RAYNEO_OK;
@@ -820,48 +854,29 @@ RAYNEO_Result Rayneo_Stop(RAYNEO_Context ctx)
 {
     if (!ctx)
         return RAYNEO_ERR_INVALID_ARG;
-    // Prevent double-stop
     if (ctx->stopIssued.exchange(true))
-    {
         return RAYNEO_OK;
-    }
     bool was = ctx->running.exchange(false);
     const bool debug = (std::getenv("RAYNEO_DEBUG_SHUTDOWN") != nullptr);
     if (was)
     {
-        if (debug)
-            std::fprintf(stderr, "[RayNeoSDK] Stop: signaling worker\n");
         ctx->stopWorker.store(true);
 #ifdef __APPLE__
         if (ctx->hidRunLoop)
             CFRunLoopWakeUp(ctx->hidRunLoop);
 #endif
         if (ctx->worker.joinable())
-        {
-            if (debug)
-                std::fprintf(stderr, "[RayNeoSDK] Stop: joining worker...\n");
             ctx->worker.join();
-            if (debug)
-                std::fprintf(stderr, "[RayNeoSDK] Stop: worker joined\n");
-        }
 #ifndef __APPLE__
         if (ctx->handle && ctx->interfaceNumber >= 0)
-        {
-            if (debug)
-                std::fprintf(stderr, "[RayNeoSDK] Stop: releasing interface %d\n", ctx->interfaceNumber);
             libusb_release_interface(ctx->handle, ctx->interfaceNumber);
-        }
         if (ctx->handle)
         {
-            if (debug)
-                std::fprintf(stderr, "[RayNeoSDK] Stop: closing handle\n");
             libusb_close(ctx->handle);
             ctx->handle = nullptr;
         }
         if (ctx->usbCtx)
         {
-            if (debug)
-                std::fprintf(stderr, "[RayNeoSDK] Stop: exiting libusb ctx\n");
             libusb_exit(ctx->usbCtx);
             ctx->usbCtx = nullptr;
         }
@@ -871,18 +886,15 @@ RAYNEO_Result Rayneo_Stop(RAYNEO_Context ctx)
             ctx->inTransfer = nullptr;
         }
 #else
-        ctx->macReady = false;
-    ctx->macReadyStatus = RAYNEO_OK;
+        ctx->macReadyStatus = RAYNEO_OK;
         ctx->macDeviceOnline.store(false);
-    macReleaseDevice(ctx);
-    macCleanupManager(ctx);
+        macReleaseDevice(ctx);
+        macCleanupManager(ctx);
 #endif
         RAYNEO_Event evt{};
         evt.type = RAYNEO_EVENT_DEVICE_DETACHED;
         evt.seq = ++ctx->seq;
         enqueueEvent(ctx, evt);
-        if (debug)
-            std::fprintf(stderr, "[RayNeoSDK] Stop: done\n");
     }
     return RAYNEO_OK;
 }
@@ -892,18 +904,9 @@ RAYNEO_Result Rayneo_PollEvent(RAYNEO_Context ctx, RAYNEO_Event *outEvent, uint3
     if (!ctx || !outEvent)
         return RAYNEO_ERR_INVALID_ARG;
     std::unique_lock<std::mutex> lk(ctx->qMtx);
-    if (timeoutMs == 0)
-    {
-        if (ctx->queue.empty())
-            return RAYNEO_ERR_TIMEOUT;
-    }
-    else
-    {
-        ctx->qCv.wait_for(lk, std::chrono::milliseconds(timeoutMs), [&]
-                          { return !ctx->queue.empty(); });
-        if (ctx->queue.empty())
-            return RAYNEO_ERR_TIMEOUT;
-    }
+    ctx->qCv.wait_for(lk, std::chrono::milliseconds(timeoutMs), [&]{ return !ctx->queue.empty(); });
+    if (ctx->queue.empty())
+        return RAYNEO_ERR_TIMEOUT;
     *outEvent = ctx->queue.front();
     ctx->queue.erase(ctx->queue.begin());
     return RAYNEO_OK;
@@ -918,11 +921,13 @@ RAYNEO_Result Rayneo_SendRaw(RAYNEO_Context ctx, const uint8_t frame[64])
 #ifndef __APPLE__
     if (!ctx->handle)
         return RAYNEO_ERR_NO_DEVICE;
+    
     int transferred = 0;
     int rc = -1;
     if (ctx->epOut)
     {
         rc = libusb_interrupt_transfer(ctx->handle, ctx->epOut, const_cast<uint8_t *>(frame), 64, &transferred, 500);
+        
         if (rc == 0 && transferred == 64)
             return RAYNEO_OK;
     }
@@ -930,6 +935,7 @@ RAYNEO_Result Rayneo_SendRaw(RAYNEO_Context ctx, const uint8_t frame[64])
     uint16_t wValue = (0x02 << 8) | 0x00; // Output report
     rc = libusb_control_transfer(ctx->handle, 0x21, 0x09, wValue, ctx->interfaceNumber >= 0 ? ctx->interfaceNumber : 0,
                                  const_cast<uint8_t *>(frame), 64, 500);
+    
     if (rc == 64)
         return RAYNEO_OK;
     return RAYNEO_ERR_IO;
