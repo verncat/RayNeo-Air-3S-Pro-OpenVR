@@ -156,6 +156,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -172,7 +176,12 @@ jobs:
           TAG=${GITHUB_REF_NAME}
           mkdir -p steamvr_zip/rayneo/bin/win64 steamvr_zip/rayneo/bin/linux64
           # copy manifest once
-          cp openvr_driver/driver.vrdrivermanifest steamvr_zip/rayneo/ || echo "Manifest missing"
+          if [ -f openvr_driver/driver.vrdrivermanifest ]; then
+            cp openvr_driver/driver.vrdrivermanifest steamvr_zip/rayneo/ || echo "Manifest copy failed"
+          else
+            echo "Manifest missing: openvr_driver/driver.vrdrivermanifest"
+            ls -l openvr_driver || true
+          fi
           # Windows driver
           if [ -d dist/openvr-driver-windows-latest/rayneo/bin/win64 ]; then
             cp dist/openvr-driver-windows-latest/rayneo/bin/win64/driver_rayneo.dll steamvr_zip/rayneo/bin/win64/ 2>/dev/null || echo "Win64 driver missing"
