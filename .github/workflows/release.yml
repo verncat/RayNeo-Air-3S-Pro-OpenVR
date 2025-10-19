@@ -64,13 +64,13 @@ jobs:
       - name: Configure CMake (Windows)
         if: startsWith(matrix.os, 'windows')
         run: |
-          cmake -B build -DRAYNEO_BUILD_EXAMPLES=ON -DRAYNEO_BUILD_OPENVR_DRIVER=OFF -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
+          cmake -B build -DRAYNEO_BUILD_EXAMPLES=ON -DRAYNEO_BUILD_OPENVR_DRIVER=ON -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
         shell: pwsh
 
       - name: Configure CMake (POSIX)
         if: matrix.os != 'windows-latest'
         run: |
-          cmake -B build -DRAYNEO_BUILD_EXAMPLES=ON -DRAYNEO_BUILD_OPENVR_DRIVER=OFF
+          cmake -B build -DRAYNEO_BUILD_EXAMPLES=ON -DRAYNEO_BUILD_OPENVR_DRIVER=ON
         shell: bash
 
       - name: Build (Windows)
@@ -79,6 +79,7 @@ jobs:
           cmake --build build --config ${{ matrix.build_type }} --target RayNeoSDK
           cmake --build build --config ${{ matrix.build_type }} --target RayNeoExample || true
           cmake --build build --config ${{ matrix.build_type }} --target RayNeoOrientationDemo || true
+          cmake --build build --config ${{ matrix.build_type }} --target openvr_stub_driver || true
         shell: pwsh
 
       - name: Build (POSIX)
@@ -87,6 +88,7 @@ jobs:
           cmake --build build --target RayNeoSDK --config ${{ matrix.build_type }}
           cmake --build build --target RayNeoExample --config ${{ matrix.build_type }} || true
           cmake --build build --target RayNeoOrientationDemo --config ${{ matrix.build_type }} || true
+          cmake --build build --target openvr_stub_driver --config ${{ matrix.build_type }} || true
         shell: bash
 
       - name: Package artifacts
@@ -101,10 +103,27 @@ jobs:
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
             cp build/${{ matrix.build_type }}/RayNeoSDK.dll package/bin/ || echo "Missing RayNeoSDK.dll"
             cp build/${{ matrix.build_type }}/RayNeoSDK.lib package/bin/ || echo "Missing RayNeoSDK.lib"
+            # OpenVR driver binary (Windows)
+            if [ -f build/openvr_driver/bin/win64/driver_rayneo.dll ]; then
+              mkdir -p openvr_pkg/rayneo/bin/win64
+              cp build/openvr_driver/bin/win64/driver_rayneo.dll openvr_pkg/rayneo/bin/win64/
+              cp openvr_driver/driver.vrdrivermanifest openvr_pkg/rayneo/
+            fi
           elif [ "${{ matrix.os }}" = "macos-latest" ]; then
             cp build/libRayNeoSDK.dylib package/bin/ || echo "Missing libRayNeoSDK.dylib"
           else
             cp build/libRayNeoSDK.so package/bin/ || echo "Missing libRayNeoSDK.so"
+            # OpenVR driver binary (Linux)
+            if [ -f build/openvr_driver/bin/win64/driver_rayneo.so ]; then
+              mkdir -p openvr_pkg/rayneo/bin/linux64
+              # NOTE: CMakeLists currently hardcodes win64 output; adjust if needed
+              cp build/openvr_driver/bin/win64/driver_rayneo.so openvr_pkg/rayneo/bin/linux64/driver_rayneo.so
+              cp openvr_driver/driver.vrdrivermanifest openvr_pkg/rayneo/
+            elif [ -f build/openvr_driver/bin/linux64/driver_rayneo.so ]; then
+              mkdir -p openvr_pkg/rayneo/bin/linux64
+              cp build/openvr_driver/bin/linux64/driver_rayneo.so openvr_pkg/rayneo/bin/linux64/
+              cp openvr_driver/driver.vrdrivermanifest openvr_pkg/rayneo/
+            fi
           fi
           # Copy examples (Windows uses config dirs; others direct)
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
@@ -115,6 +134,9 @@ jobs:
             cp build/examples/orientation_demo/* package/examples/ 2>/dev/null || true
           fi
           tar -czf rayneo-sdk-${{ matrix.os }}.tar.gz package
+          if [ -d openvr_pkg ]; then
+            zip -r steamvr_rayneo_driver-${GITHUB_REF_NAME}.zip openvr_pkg/*
+          fi
         shell: bash
 
       - name: Upload artifact
@@ -122,6 +144,12 @@ jobs:
         with:
           name: rayneo-sdk-${{ matrix.os }}
           path: rayneo-sdk-${{ matrix.os }}.tar.gz
+      - name: Upload OpenVR driver artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: steamvr_rayneo_driver-${{ matrix.os }}
+          path: steamvr_rayneo_driver-${GITHUB_REF_NAME}.zip
 
   release:
     name: Create Release
@@ -145,6 +173,8 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: RayNeo SDK ${{ github.ref_name }}
           body: ${{ steps.notes.outputs.release_body }}
-          files: dist/*/*.tar.gz
+          files: |
+            dist/*/*.tar.gz
+            dist/*/steamvr_rayneo_driver-*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
