@@ -60,7 +60,10 @@ typedef enum RAYNEO_EventType {
     RAYNEO_EVENT_DEVICE_INFO     = 3,
     RAYNEO_EVENT_ERROR           = 4,
     RAYNEO_EVENT_LOG             = 5,
-    RAYNEO_EVENT_NOTIFY          = 6  // new in 1.2 (e.g. sleep/wake)
+    RAYNEO_EVENT_NOTIFY          = 6,  // new in 1.2 (e.g. sleep/wake)
+    RAYNEO_NOTIFY_SLEEP          = 7,
+    RAYNEO_NOTIFY_WAKE           = 8,
+    RAYNEO_NOTIFY_BUTTON         = 9
 } RAYNEO_EventType;
 
 typedef struct RAYNEO_ImuSample {

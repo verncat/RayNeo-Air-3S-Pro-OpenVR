@@ -8,6 +8,10 @@
 #include <atomic>
 #include <thread>
 
+// Forward accessor to provider instance (implemented in device_provider.cpp)
+class MyDeviceProvider; // forward
+MyDeviceProvider* GetMyDeviceProviderInstance();
+
 enum MyComponent
 {
 	MyComponent_system_touch,

@@ -44,6 +44,7 @@ target_include_directories(openvr_stub_driver
     PRIVATE
         ${CMAKE_SOURCE_DIR}/thirdparties/openvr/headers
         ${CMAKE_SOURCE_DIR}/openvr_driver
+        ${CMAKE_SOURCE_DIR}/include
 )
 
 target_compile_features(openvr_stub_driver PRIVATE cxx_std_17)
@@ -54,15 +55,34 @@ target_compile_options(openvr_stub_driver PRIVATE -fPIC)
 set_target_properties(openvr_stub_driver PROPERTIES OUTPUT_NAME "driver_stub")
 set_target_properties(openvr_stub_driver PROPERTIES PREFIX "driver_")
 set_target_properties(openvr_stub_driver PROPERTIES OUTPUT_NAME "rayneo")
-message(${PROJECT_BINARY_DIR}/bin/win64/)
-# todo: adjust output directory by arch
+
+# Platform-specific output directory (match SteamVR driver folder conventions)
+if (WIN32)
+    set(_DRV_OUT_DIR ${PROJECT_BINARY_DIR}/bin/win64)
+elseif(UNIX AND NOT APPLE)
+    set(_DRV_OUT_DIR ${PROJECT_BINARY_DIR}/bin/linux64)
+elseif(APPLE)
+    # macOS still often uses osx64 naming in SteamVR
+    set(_DRV_OUT_DIR ${PROJECT_BINARY_DIR}/bin/osx64)
+endif()
+if (NOT _DRV_OUT_DIR)
+    set(_DRV_OUT_DIR ${PROJECT_BINARY_DIR}/bin/win64) # fallback
+endif()
 set_target_properties(openvr_stub_driver PROPERTIES
-         LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin/win64/)
-set_target_properties(openvr_stub_driver PROPERTIES
-         RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin/win64/)
-if(WIN32)
-set_target_properties(openvr_stub_driver PROPERTIES
-         RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin/win64/)
+    LIBRARY_OUTPUT_DIRECTORY ${_DRV_OUT_DIR}
+    RUNTIME_OUTPUT_DIRECTORY ${_DRV_OUT_DIR}
+)
+
+if (TARGET RayNeoSDK)
+    target_link_libraries(openvr_stub_driver PRIVATE RayNeoSDK)
+    # Deploy RayNeo runtime next to driver using central helper from top-level CMake.
+    if (COMMAND rayneo_deploy_runtime)
+        rayneo_deploy_runtime(openvr_stub_driver)
+    else()
+        message(WARNING "rayneo_deploy_runtime() not available; runtime DLLs may not be copied.")
+    endif()
+else()
+    message(FATAL_ERROR "RayNeoSDK target not found; build top-level project with RAYNEO_BUILD_OPENVR_DRIVER=ON")
 endif()
 
 

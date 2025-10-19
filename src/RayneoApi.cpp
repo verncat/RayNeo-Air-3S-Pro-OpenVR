@@ -97,6 +97,60 @@ enum : uint8_t
     RAYNEO_PROTO_NOTIFY_FAIL = 0x02
 };
 
+enum FXRUsbCommand {
+    kCmdDeviceInfo = 0,
+    kCmdImuOn = 1,
+    kCmdImuOff = 2,
+    kCmdSensorGyroCorrection = 3,
+    kCmdDisplay3dMode = 6,
+    kCmdDisplay2dMode = 7,
+    kCmdPanelPresetSet = 9,
+    kCmdSetPanelRotation = 0xA,
+    kCmdPanelLumaSave = 0xD,
+    kCmdPanelPowerOn = 0xE,
+    kCmdPanelPowerOff = 0xF,
+    kCmdPanelPowerSwitch = 0x10,
+    kCmdPanelSwap = 0x12,
+    kCmdAccelerateRate = 0x19,
+    kCmdGyroRate = 0x1A,
+    kCmdMagnetRate = 0x1B,
+    kCmdParamReset = 0x1D,
+    kCmdParamSave = 0x1F,
+    kCmdPanelSet60fps = 0x20,
+    kCmdPanelSet120fps = 0x21,
+    kAckWheelKeyDoublePressed = 0x22,
+    kCmdPanelGetFov = 0x23,
+    KCmdAudioEnablePersistence = 0x25, //静音模式, 仅白羊1.0支持
+    kCmdSideBySideChange = 0x30,
+    kCmdTraceReport = 0x33, //设备ID
+    kCmdAudioEnable = 0x34,
+    kCmdPsensorEnable = 0x38,
+    kCmdImuCalibration = 0x3C,
+    kCmdGetGyroBias = 0x3E,
+    kCmdSetGyroBias = 0x3F,
+    kAckGlassesSleepNotify = 0x41,
+    kAckGlassesWakeupNotify = 0x42,
+    kCmdAudioMode = 0x49,
+    kCmdVolumeSet = 0x50,
+    kCmdVolumeUp = 0x51,
+    kCmdVolumeDown = 0x52,
+    kAckWheelKeyPressed = 0x54,
+    kCmdLuminanceUp = 0x55,
+    kCmdLuminanceDown = 0x56,
+    kAckWheelKeyLongPressed = 0x57,
+    kCmdWheelKeySideBySideDisable = 0x58,
+    kAckImuData = 0x65,
+    kCmdReboot2Bootloader = 0x66,
+    kCmdCaluLum = 0x67,
+    kCmdGetLT7211Version = 0x6A,
+    kCmdPanelColorAdjust = 0x73,
+    kAckCommand = 0xC8,
+    kAckUsbCommandLog = 0xC9,
+    kAckTraceReport = 0xCA,
+    kCmdUsbCommandPARGESDump = 0xCB,
+    kCmdTimeSynchronize = 0xE1, //设备间时钟同步
+};
+
 static void enqueueEvent(RayneoContext__ *ctx, const RAYNEO_Event &evt);
 
 static void processInboundFrame(RayneoContext__ *ctx, const uint8_t *buf, size_t len)
@@ -202,7 +256,31 @@ static void processInboundFrame(RayneoContext__ *ctx, const uint8_t *buf, size_t
             return f;
         };
         info.tick = rdU32p();
-        info.value = rdBp();
+        auto value = rdBp();
+        if (value == kAckGlassesSleepNotify) {
+            RAYNEO_Event evt{};
+            evt.type = RAYNEO_EVENT_NOTIFY;
+            evt.seq = ++ctx->seq;
+            evt.data.notify.code = RAYNEO_NOTIFY_SLEEP;
+            enqueueEvent(ctx, evt);
+            return;
+        }else if (value == kAckGlassesWakeupNotify) {
+            RAYNEO_Event evt{};
+            evt.type = RAYNEO_EVENT_NOTIFY;
+            evt.seq = ++ctx->seq;
+            evt.data.notify.code = RAYNEO_NOTIFY_WAKE;
+            enqueueEvent(ctx, evt);
+            return;
+        } else if (value == 0x49) { // todo: remove magic number
+            RAYNEO_Event evt{};
+            evt.type = RAYNEO_EVENT_NOTIFY;
+            evt.seq = ++ctx->seq;
+            evt.data.notify.code = RAYNEO_NOTIFY_BUTTON;
+            enqueueEvent(ctx, evt);
+            return;
+        } else if (value != 0) {
+            printf("[SimpleClient] Unknown Notify? 0x%02X\n", value);
+        }
         if (need(12))
         {
             std::memcpy(info.cpuid, p + off, 12);
@@ -731,7 +809,7 @@ RAYNEO_Result Rayneo_Start(RAYNEO_Context ctx, uint32_t /*serviceFlags*/)
     if (ctx->interfaceNumber >= 0)
     {
         libusb_set_auto_detach_kernel_driver(ctx->handle, 1);
-        
+
         int active = libusb_kernel_driver_active(ctx->handle, ctx->interfaceNumber);
         if (active == 1)
         {
@@ -1003,18 +1081,33 @@ RAYNEO_Result Rayneo_EnableImu(RAYNEO_Context ctx)
     if (!ctx)
         return RAYNEO_ERR_INVALID_ARG;
     // Command 0x01 = IMU ON (по соглашению из клиента)
-    return Rayneo_SendCommand(ctx, 0x01, 0x00, nullptr, 0);
+    return Rayneo_SendCommand(ctx, kCmdImuOn, 0x00, nullptr, 0);
 }
 
-RAYNEO_Result Rayneo_DisableImu(RAYNEO_Context ctx) { return Rayneo_SendCommand(ctx, 0x02, 0x00, nullptr, 0); }
+RAYNEO_Result Rayneo_DisableImu(RAYNEO_Context ctx) { return Rayneo_SendCommand(ctx, kCmdImuOff, 0x00, nullptr, 0); }
 RAYNEO_Result Rayneo_RequestDeviceInfo(RAYNEO_Context ctx)
 {
     if (!ctx)
         return RAYNEO_ERR_INVALID_ARG;
-    return Rayneo_SendCommand(ctx, 0x00, 0x00, nullptr, 0);
+    return Rayneo_SendCommand(ctx, kCmdDeviceInfo, 0x00, nullptr, 0);
 }
-RAYNEO_Result Rayneo_DisplaySet3D(RAYNEO_Context /*ctx*/) { return RAYNEO_OK; }
-RAYNEO_Result Rayneo_DisplaySet2D(RAYNEO_Context /*ctx*/) { return RAYNEO_OK; }
+// Set display into 3D (stereoscopic) mode.
+// Command IDs from XRDeviceState.h: kCmdDisplay3dMode = 6, kCmdDisplay2dMode = 7
+// We send 0x66 magic, command=6, value=0, no payload (same pattern as IMU enable).
+RAYNEO_Result Rayneo_DisplaySet3D(RAYNEO_Context ctx)
+{
+    if (!ctx) return RAYNEO_ERR_INVALID_ARG;
+    if (!ctx->running.load()) return RAYNEO_ERR_NO_DEVICE;
+    return Rayneo_SendCommand(ctx, kCmdDisplay3dMode, 0x00, nullptr, 0);
+}
+
+// Set display into 2D (mono mirror) mode.
+RAYNEO_Result Rayneo_DisplaySet2D(RAYNEO_Context ctx)
+{
+    if (!ctx) return RAYNEO_ERR_INVALID_ARG;
+    if (!ctx->running.load()) return RAYNEO_ERR_NO_DEVICE;
+    return Rayneo_SendCommand(ctx, kCmdDisplay2dMode, 0x00, nullptr, 0);
+}
 
 RAYNEO_Result Rayneo_GetLastImu(RAYNEO_Context ctx, RAYNEO_ImuSample *out)
 {

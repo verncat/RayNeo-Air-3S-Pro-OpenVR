@@ -4,6 +4,9 @@
 #include "driverlog.h"
 #include "vrmath.h"
 #include <string.h>
+#include "display_edid_finder.h"
+#include "device_provider.h" // need full definition for GetImuOrientation
+#include <cmath>
 
 // Let's create some variables for strings used in getting settings.
 // This is the section where all of the settings we want are stored. A section name can be anything,
@@ -16,6 +19,27 @@ MyHMDControllerDeviceDriver::MyHMDControllerDeviceDriver()
 {
 	// Keep track of whether Activate() has been called
 	is_active_ = false;
+
+	// Wait (up to 5 seconds) for the 3D mode display to appear with EDID (product=980, serial=17).
+	// Switching to 3D reportedly changes the display's identifiers to these values.
+	std::optional<DisplayEdidInfo> edidMatch;
+	{
+		auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+		while (std::chrono::steady_clock::now() < deadline) {
+			try {
+				edidMatch = DisplayEdidFinder::FindDisplayByEdid(980, 17);
+			} catch(...) {
+				DriverLog("Exception while polling EDID (ignored)");
+			}
+			if (edidMatch) break;
+			std::this_thread::sleep_for(std::chrono::milliseconds(250));
+		}
+		if (edidMatch) {
+			DriverLog("EDID (3D) display detected after wait: instance='%s' product=%u serial=%u name='%s'", edidMatch->device_instance_id.c_str(), edidMatch->product_code, edidMatch->serial_number, edidMatch->monitor_name.c_str());
+		} else {
+			DriverLog("EDID (product=980 serial=17) not present within 5s wait; using fallback settings.");
+		}
+	}
 
 	// We have our model number and serial number stored in SteamVR settings. We need to get them and do so here.
 	// Other IVRSettings methods (to get int32, floats, bools) return the data, instead of modifying, but strings are
@@ -35,12 +59,36 @@ MyHMDControllerDeviceDriver::MyHMDControllerDeviceDriver()
 	DriverLog( "My Dummy HMD Model Number: %s", my_hmd_model_number_.c_str() );
 	DriverLog( "My Dummy HMD Serial Number: %s", my_hmd_serial_number_.c_str() );
 
-	// Display settings
-	// {X=2560,Y=370,Width=1920,Height=1080}
+	// Display settings derived from EDID if available (preferred timing). Fallback to hardcoded defaults.
+	uint32_t winX = 2560;
+	uint32_t winY = 370;
+	uint32_t width = 1920;
+	uint32_t height = 1080;
+	uint32_t renderW = width;
+	uint32_t renderH = height;
+
+	// Use previously found EDID match (product 980 serial 17) to adjust width/height if preferred mode parsed.
+	if (edidMatch) {
+		// Resolution from EDID preferred timing
+		if (edidMatch->preferred_width && edidMatch->preferred_height) {
+			width = edidMatch->preferred_width;
+			height = edidMatch->preferred_height;
+			renderW = width;
+			renderH = height;
+			DriverLog("RayNeo Using EDID preferred mode %ux%u", width, height);
+		}
+		DisplayEdidInfo tmp = *edidMatch;
+		if (DisplayEdidFinder::PopulateDesktopCoordinates(tmp)) {
+			winX = static_cast<uint32_t>(tmp.desktop_x);
+			winY = static_cast<uint32_t>(tmp.desktop_y);
+			DriverLog("RayNeo Using monitor desktop origin (%d,%d)", tmp.desktop_x, tmp.desktop_y);
+		}
+	}
+
 	MyHMDDisplayDriverConfiguration display_configuration{
-		2560, 370,
-		1920, 1080,
-		1920, 1080
+		static_cast<int32_t>(winX), static_cast<int32_t>(winY),
+		static_cast<int32_t>(width), static_cast<int32_t>(height),
+		static_cast<int32_t>(renderW), static_cast<int32_t>(renderH)
 	};
 	// display_configuration.window_x = vr::VRSettings()->GetInt32( my_hmd_display_settings_section, "window_x" );
 	// display_configuration.window_y = vr::VRSettings()->GetInt32( my_hmd_display_settings_section, "window_y" );
@@ -118,9 +166,14 @@ vr::EVRInitError MyHMDControllerDeviceDriver::Activate( uint32_t unObjectId )
 	my_pose_update_thread_ = std::thread( &MyHMDControllerDeviceDriver::MyPoseUpdateThread, this );
 
 	// We've activated everything successfully!
+	// Basic static properties already set above; no duplicate container variable.
+
+	// RayNeo lifecycle moved to MyDeviceProvider (context + event thread). Device activation no longer starts RayNeo.
+
 	// Let's tell SteamVR that by saying we don't have any errors.
 	return vr::VRInitError_None;
 }
+
 
 //-----------------------------------------------------------------------------
 // Purpose: If you're an HMD, this is where you would return an implementation
@@ -161,15 +214,35 @@ vr::DriverPose_t MyHMDControllerDeviceDriver::GetPose()
 	pose.qWorldFromDriverRotation.w = 1.f;
 	pose.qDriverFromHeadRotation.w = 1.f;
 
-	pose.qRotation.w = 1.f;
+	// Obtain orientation from provider's IMU integration if available
+	float qw=1.f, qx=0.f, qy=0.f, qz=0.f;
+	if (auto *prov = GetMyDeviceProviderInstance()) {
+		prov->GetImuOrientation(qw,qx,qy,qz);
+		// Validate quaternion (normalize, fallback to identity if degenerate)
+		float nrm = std::sqrt(qw*qw + qx*qx + qy*qy + qz*qz);
+		if (nrm > 0.00001f && std::isfinite(nrm)) {
+			qw /= nrm; qx /= nrm; qy /= nrm; qz /= nrm;
+		} else {
+			qw = 1.f; qx = qy = qz = 0.f;
+		}
+	}
+	pose.qRotation.w = qw;
+	pose.qRotation.x = qx;
+	pose.qRotation.y = qy;
+	pose.qRotation.z = qz;
 
-	pose.vecPosition[ 0 ] = 0.0f;
-	pose.vecPosition[ 1 ] = sin( frame_number_ * 0.01 ) * 0.1f + 1.0f; // slowly move the hmd up and down.
-	pose.vecPosition[ 2 ] = 0.0f;
+	// Position (simple demo). If sleeping, keep fixed.
+	bool sleeping = false;
+	if (auto *prov = GetMyDeviceProviderInstance()) sleeping = prov->IsSleeping();
+	pose.vecPosition[0] = 0.0f;
+	pose.vecPosition[1] = sleeping ? 1.0f : 1.5f;
+	pose.vecPosition[2] = 0.0f;
 
-	// The pose we provided is valid.
-	// This should be set is
-	pose.poseIsValid = true;
+	// The pose we provide: when sleeping, mark invalid/out-of-range to hint standby.
+	pose.poseIsValid = !sleeping;
+	if (sleeping) {
+		pose.result = vr::TrackingResult_Running_OutOfRange;
+	}
 
 	// Our device is always connected.
 	// In reality with physical devices, when they get disconnected,
@@ -225,6 +298,8 @@ void MyHMDControllerDeviceDriver::Deactivate()
 		my_pose_update_thread_.join();
 	}
 
+	// RayNeo teardown moved to MyDeviceProvider.
+
 	// unassign our controller index (we don't want to be calling vrserver anymore after Deactivate() has been called
 	device_index_ = vr::k_unTrackedDeviceIndexInvalid;
 }
@@ -238,6 +313,20 @@ void MyHMDControllerDeviceDriver::MyRunFrame()
 {
 	frame_number_++;
 	// update our inputs here
+	// Sleep signaling now handled via pose flags in GetPose()
+
+	// Map RayNeo BUTTON notify to a system click pulse
+	if (auto *prov = GetMyDeviceProviderInstance()) {
+		if (prov->ConsumeButtonNotifyPending()) {
+			// Fire a brief click (true then false). SteamVR expects updates through VRDriverInput()->UpdateBooleanComponent.
+			if (my_input_handles_[MyComponent_system_click] != vr::k_ulInvalidInputComponentHandle) {
+				vr::VRDriverInput()->UpdateBooleanComponent(my_input_handles_[MyComponent_system_click], true, 0.0);
+				vr::VRDriverInput()->UpdateBooleanComponent(my_input_handles_[MyComponent_system_click], false, 0.0);
+			}
+		}
+	}
+
+	
 }
 
 
@@ -349,10 +438,10 @@ vr::DistortionCoordinates_t MyHMDDisplayComponent::ComputeDistortion( vr::EVREye
 //-----------------------------------------------------------------------------
 void MyHMDDisplayComponent::GetWindowBounds( int32_t *pnX, int32_t *pnY, uint32_t *pnWidth, uint32_t *pnHeight )
 {
-	*pnX = 2560;// config_.window_x;
-	*pnY = 370;// config_.window_y;
-	*pnWidth = 1920;// config_.window_width;
-	*pnHeight = 1080;// config_.window_height;
+	*pnX = config_.window_x;
+	*pnY = config_.window_y;
+	*pnWidth = static_cast<uint32_t>(config_.window_width);
+	*pnHeight = static_cast<uint32_t>(config_.window_height);
 }
 
 bool MyHMDDisplayComponent::ComputeInverseDistortion(vr::HmdVector2_t* pResult, vr::EVREye eEye, uint32_t unChannel, float fU, float fV)

@@ -34,10 +34,12 @@ function(rayneo_deploy_runtime tgt)
 
     # Non-Apple: attempt libusb runtime copy if path known.
     if (NOT APPLE AND RAYNEO_LIBUSB_RUNTIME_PATH)
+        # Preserve original filename (DLL on Windows, .so on Linux)
+        get_filename_component(_rayneo_libusb_name "${RAYNEO_LIBUSB_RUNTIME_PATH}" NAME)
         add_custom_command(TARGET ${tgt} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${RAYNEO_LIBUSB_RUNTIME_PATH}" $<TARGET_FILE_DIR:${tgt}>/libusb-1.0.dll
-            COMMENT "Deploying libusb runtime to ${tgt}")
+                "${RAYNEO_LIBUSB_RUNTIME_PATH}" "$<TARGET_FILE_DIR:${tgt}>/${_rayneo_libusb_name}"
+            COMMENT "Deploying libusb runtime (${_rayneo_libusb_name}) to ${tgt}")
     endif()
 endfunction()
 
