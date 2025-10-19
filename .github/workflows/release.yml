@@ -34,8 +34,11 @@ jobs:
           else
             echo "Manifest missing"; ls -l openvr_driver || true
           fi
-          if [ -d dist/openvr-driver-windows-latest/rayneo/bin/win64 ]; then
-            cp dist/openvr-driver-windows-latest/rayneo/bin/win64/driver_rayneo.dll steamvr_zip/rayneo/bin/win64/ || echo "Win64 driver missing"
+          WIN_DLL=$(find dist -type f -path "*openvr-driver-windows-latest*driver_rayneo.dll" -print -quit || true)
+          if [ -n "$WIN_DLL" ]; then
+            cp "$WIN_DLL" steamvr_zip/rayneo/bin/win64/driver_rayneo.dll || echo "Copy win64 failed"
+          else
+            echo "Windows driver dll not found; listing dist:"; ls -R dist/openvr-driver-windows-latest || true
           fi
           if [ -d dist/openvr-driver-ubuntu-latest/rayneo/bin/linux64 ]; then
             cp dist/openvr-driver-ubuntu-latest/rayneo/bin/linux64/driver_rayneo.so steamvr_zip/rayneo/bin/linux64/ || echo "Linux64 driver missing"
