@@ -2,14 +2,53 @@ name: Build & Release RayNeo SDK
 
 on:
   push:
-    branches: [ main ]
-    tags: [ 'v*' ]
+    branches:
+      - main
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: write   # needed to create releases
 
 jobs:
+  assemble_driver:
+    name: Assemble OpenVR Driver Zip
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Build combined driver zip
+        run: |
+          TAG=${GITHUB_REF_NAME}
+          mkdir -p steamvr_zip/rayneo/bin/win64 steamvr_zip/rayneo/bin/linux64
+          if [ -f openvr_driver/driver.vrdrivermanifest ]; then
+            cp openvr_driver/driver.vrdrivermanifest steamvr_zip/rayneo/
+          else
+            echo "Manifest missing"; ls -l openvr_driver || true
+          fi
+          if [ -d dist/openvr-driver-windows-latest/rayneo/bin/win64 ]; then
+            cp dist/openvr-driver-windows-latest/rayneo/bin/win64/driver_rayneo.dll steamvr_zip/rayneo/bin/win64/ || echo "Win64 driver missing"
+          fi
+          if [ -d dist/openvr-driver-ubuntu-latest/rayneo/bin/linux64 ]; then
+            cp dist/openvr-driver-ubuntu-latest/rayneo/bin/linux64/driver_rayneo.so steamvr_zip/rayneo/bin/linux64/ || echo "Linux64 driver missing"
+          fi
+          (cd steamvr_zip && zip -r steamvr_rayneo_driver-${TAG}.zip rayneo)
+          mkdir -p dist/steamvr_driver
+          cp steamvr_zip/steamvr_rayneo_driver-${TAG}.zip dist/steamvr_driver/
+        shell: bash
+      - name: Upload combined driver zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: steamvr_rayneo_driver
+          path: dist/steamvr_driver/steamvr_rayneo_driver-${{ github.ref_name }}.zip
   build:
     name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -148,44 +187,6 @@ jobs:
           name: openvr-driver-${{ matrix.os }}
           path: openvr_driver_artifacts/**
 
-  assemble_driver:
-    name: Assemble OpenVR Driver Zip
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: false
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: dist
-      - name: Build combined driver zip
-        run: |
-          TAG=${GITHUB_REF_NAME}
-          mkdir -p steamvr_zip/rayneo/bin/win64 steamvr_zip/rayneo/bin/linux64
-          if [ -f openvr_driver/driver.vrdrivermanifest ]; then
-            cp openvr_driver/driver.vrdrivermanifest steamvr_zip/rayneo/
-          else
-            echo "Manifest missing"; ls -l openvr_driver || true
-          fi
-          if [ -d dist/openvr-driver-windows-latest/rayneo/bin/win64 ]; then
-            cp dist/openvr-driver-windows-latest/rayneo/bin/win64/driver_rayneo.dll steamvr_zip/rayneo/bin/win64/ || echo "Win64 driver missing"
-          fi
-            if [ -d dist/openvr-driver-ubuntu-latest/rayneo/bin/linux64 ]; then
-            cp dist/openvr-driver-ubuntu-latest/rayneo/bin/linux64/driver_rayneo.so steamvr_zip/rayneo/bin/linux64/ || echo "Linux64 driver missing"
-          fi
-          (cd steamvr_zip && zip -r steamvr_rayneo_driver-${TAG}.zip rayneo)
-          mkdir -p dist/steamvr_driver
-          cp steamvr_zip/steamvr_rayneo_driver-${TAG}.zip dist/steamvr_driver/
-        shell: bash
-      - name: Upload combined driver zip
-        uses: actions/upload-artifact@v4
-        with:
-          name: steamvr_rayneo_driver
-          path: dist/steamvr_driver/steamvr_rayneo_driver-${{ github.ref_name }}.zip
-
   release:
     name: Create Release
     if: startsWith(github.ref, 'refs/tags/')
@@ -199,12 +200,12 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          release:
-            name: Create Release
-            if: startsWith(github.ref, 'refs/tags/')
-            runs-on: ubuntu-latest
-            needs: [build, assemble_driver]
-            steps:
+          path: dist
+      - name: Generate Release Notes
+        id: notes
+        run: |
+          echo "release_body<<EOF" >> $GITHUB_OUTPUT
+          echo "RayNeo SDK release for tag $GITHUB_REF_NAME" >> $GITHUB_OUTPUT
           echo "Includes prebuilt binaries for Windows, macOS, and Linux." >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
       - name: Skip assembly (already done)
@@ -216,8 +217,8 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: RayNeo SDK ${{ github.ref_name }}
           body: ${{ steps.notes.outputs.release_body }}
-              - name: Skip assembly (already done)
-                run: echo "Driver zip assembled in assemble_driver job"
-                shell: bash
+          files: |
+            dist/*/*.tar.gz
+            dist/steamvr_driver/steamvr_rayneo_driver-*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
