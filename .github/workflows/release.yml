@@ -145,12 +145,15 @@ jobs:
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
             cp build/${{ matrix.build_type }}/RayNeoSDK.dll package/bin/ || echo "Missing RayNeoSDK.dll"
             cp build/${{ matrix.build_type }}/RayNeoSDK.lib package/bin/ || echo "Missing RayNeoSDK.lib"
-            # OpenVR driver binary (Windows)
-            if [ -f build/openvr_driver/bin/win64/driver_rayneo.dll ]; then
+            # OpenVR driver binary (Windows) - search recursively (handles config subdir patterns)
+            WIN_DRIVER=$(find build/openvr_driver -type f -name driver_rayneo.dll -print -quit 2>/dev/null || true)
+            if [ -n "$WIN_DRIVER" ]; then
               mkdir -p openvr_driver_artifacts/rayneo/bin/win64
-              cp build/openvr_driver/bin/win64/driver_rayneo.dll openvr_driver_artifacts/rayneo/bin/win64/
+              cp "$WIN_DRIVER" openvr_driver_artifacts/rayneo/bin/win64/driver_rayneo.dll
+              echo "Found Windows driver at $WIN_DRIVER"
             else
-              echo "OpenVR Windows driver not found"
+              echo "OpenVR Windows driver not found; tree of build/openvr_driver:";
+              ls -R build/openvr_driver || true
             fi
           elif [ "${{ matrix.os }}" = "macos-latest" ]; then
             cp build/libRayNeoSDK.dylib package/bin/ || echo "Missing libRayNeoSDK.dylib"
