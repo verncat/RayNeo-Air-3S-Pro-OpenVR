@@ -117,11 +117,14 @@ jobs:
           else
             cp build/libRayNeoSDK.so package/bin/ || echo "Missing libRayNeoSDK.so"
             # OpenVR driver binary (Linux)
-            if [ -f build/openvr_driver/bin/linux64/driver_rayneo.so ]; then
+            DRIVER_SO=$(find build/openvr_driver -name driver_rayneo.so -print -quit || true)
+            if [ -n "$DRIVER_SO" ]; then
               mkdir -p openvr_driver_artifacts/rayneo/bin/linux64
-              cp build/openvr_driver/bin/linux64/driver_rayneo.so openvr_driver_artifacts/rayneo/bin/linux64/
+              cp "$DRIVER_SO" openvr_driver_artifacts/rayneo/bin/linux64/driver_rayneo.so
+              echo "Found Linux driver at $DRIVER_SO"
             else
-              echo "OpenVR Linux driver not found"
+              echo "OpenVR Linux driver not found; listing build/openvr_driver:";
+              ls -R build/openvr_driver || true
             fi
           fi
           # Copy examples (Windows uses config dirs; others direct)
