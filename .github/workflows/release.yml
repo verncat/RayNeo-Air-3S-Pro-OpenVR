@@ -2,6 +2,8 @@ name: Build & Release RayNeo SDK
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
@@ -105,24 +107,21 @@ jobs:
             cp build/${{ matrix.build_type }}/RayNeoSDK.lib package/bin/ || echo "Missing RayNeoSDK.lib"
             # OpenVR driver binary (Windows)
             if [ -f build/openvr_driver/bin/win64/driver_rayneo.dll ]; then
-              mkdir -p openvr_pkg/rayneo/bin/win64
-              cp build/openvr_driver/bin/win64/driver_rayneo.dll openvr_pkg/rayneo/bin/win64/
-              cp openvr_driver/driver.vrdrivermanifest openvr_pkg/rayneo/
+              mkdir -p openvr_driver_artifacts/rayneo/bin/win64
+              cp build/openvr_driver/bin/win64/driver_rayneo.dll openvr_driver_artifacts/rayneo/bin/win64/
+            else
+              echo "OpenVR Windows driver not found"
             fi
           elif [ "${{ matrix.os }}" = "macos-latest" ]; then
             cp build/libRayNeoSDK.dylib package/bin/ || echo "Missing libRayNeoSDK.dylib"
           else
             cp build/libRayNeoSDK.so package/bin/ || echo "Missing libRayNeoSDK.so"
             # OpenVR driver binary (Linux)
-            if [ -f build/openvr_driver/bin/win64/driver_rayneo.so ]; then
-              mkdir -p openvr_pkg/rayneo/bin/linux64
-              # NOTE: CMakeLists currently hardcodes win64 output; adjust if needed
-              cp build/openvr_driver/bin/win64/driver_rayneo.so openvr_pkg/rayneo/bin/linux64/driver_rayneo.so
-              cp openvr_driver/driver.vrdrivermanifest openvr_pkg/rayneo/
-            elif [ -f build/openvr_driver/bin/linux64/driver_rayneo.so ]; then
-              mkdir -p openvr_pkg/rayneo/bin/linux64
-              cp build/openvr_driver/bin/linux64/driver_rayneo.so openvr_pkg/rayneo/bin/linux64/
-              cp openvr_driver/driver.vrdrivermanifest openvr_pkg/rayneo/
+            if [ -f build/openvr_driver/bin/linux64/driver_rayneo.so ]; then
+              mkdir -p openvr_driver_artifacts/rayneo/bin/linux64
+              cp build/openvr_driver/bin/linux64/driver_rayneo.so openvr_driver_artifacts/rayneo/bin/linux64/
+            else
+              echo "OpenVR Linux driver not found"
             fi
           fi
           # Copy examples (Windows uses config dirs; others direct)
@@ -134,9 +133,6 @@ jobs:
             cp build/examples/orientation_demo/* package/examples/ 2>/dev/null || true
           fi
           tar -czf rayneo-sdk-${{ matrix.os }}.tar.gz package
-          if [ -d openvr_pkg ]; then
-            zip -r steamvr_rayneo_driver-${{ github.ref_name }}.zip openvr_pkg/*
-          fi
         shell: bash
 
       - name: Upload artifact
@@ -144,15 +140,16 @@ jobs:
         with:
           name: rayneo-sdk-${{ matrix.os }}
           path: rayneo-sdk-${{ matrix.os }}.tar.gz
-      - name: Upload OpenVR driver artifact
+      - name: Upload OpenVR driver raw artifacts
         if: (matrix.os == 'windows-latest') || (matrix.os == 'ubuntu-latest')
         uses: actions/upload-artifact@v4
         with:
-          name: steamvr_rayneo_driver-${{ matrix.os }}
-          path: steamvr_rayneo_driver-${{ github.ref_name }}.zip
+          name: openvr-driver-${{ matrix.os }}
+          path: openvr_driver_artifacts/**
 
   release:
     name: Create Release
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     needs: build
     steps:
@@ -167,6 +164,24 @@ jobs:
           echo "RayNeo SDK release for tag $GITHUB_REF_NAME" >> $GITHUB_OUTPUT
           echo "Includes prebuilt binaries for Windows, macOS, and Linux." >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+      - name: Assemble OpenVR driver zip
+        run: |
+          TAG=${GITHUB_REF_NAME}
+          mkdir -p steamvr_zip/rayneo/bin/win64 steamvr_zip/rayneo/bin/linux64
+          # copy manifest once
+          cp openvr_driver/driver.vrdrivermanifest steamvr_zip/rayneo/ || echo "Manifest missing"
+          # Windows driver
+          if [ -d dist/openvr-driver-windows-latest/rayneo/bin/win64 ]; then
+            cp dist/openvr-driver-windows-latest/rayneo/bin/win64/driver_rayneo.dll steamvr_zip/rayneo/bin/win64/ 2>/dev/null || echo "Win64 driver missing"
+          fi
+          # Linux driver
+          if [ -d dist/openvr-driver-ubuntu-latest/rayneo/bin/linux64 ]; then
+            cp dist/openvr-driver-ubuntu-latest/rayneo/bin/linux64/driver_rayneo.so steamvr_zip/rayneo/bin/linux64/ 2>/dev/null || echo "Linux64 driver missing"
+          fi
+          (cd steamvr_zip && zip -r steamvr_rayneo_driver-${TAG}.zip rayneo)
+          mkdir -p dist/steamvr_driver
+          cp steamvr_zip/steamvr_rayneo_driver-${TAG}.zip dist/steamvr_driver/
+        shell: bash
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -175,6 +190,6 @@ jobs:
           body: ${{ steps.notes.outputs.release_body }}
           files: |
             dist/*/*.tar.gz
-            dist/*/steamvr_rayneo_driver-*.zip
+            dist/steamvr_driver/steamvr_rayneo_driver-*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
