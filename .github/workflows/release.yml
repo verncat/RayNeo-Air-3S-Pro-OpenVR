@@ -187,7 +187,7 @@ jobs:
 
   release:
     name: Create Release
-    if: startsWith(github.ref, 'refs/tags/')
+
     runs-on: ubuntu-latest
     needs: build
     steps:
@@ -203,18 +203,32 @@ jobs:
         id: notes
         run: |
           echo "release_body<<EOF" >> $GITHUB_OUTPUT
-          echo "RayNeo SDK release for tag $GITHUB_REF_NAME" >> $GITHUB_OUTPUT
+          echo "RayNeo SDK release triggered by $GITHUB_REF" >> $GITHUB_OUTPUT
           echo "Includes prebuilt binaries for Windows, macOS, and Linux." >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
+      - name: Compose Release Meta
+        id: meta
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF_NAME}"
+            NAME="RayNeo SDK ${GITHUB_REF_NAME}"
+          else
+            TS=$(date -u +%Y%m%d-%H%M%S)
+            SHORT_SHA=$(git rev-parse --short HEAD)
+            TAG="sdk-${TS}-${SHORT_SHA}"
+            NAME="RayNeo SDK ${TS}-${SHORT_SHA}"
+          fi
+          echo "tag_name=$TAG" >> "$GITHUB_OUTPUT"
+          echo "release_name=$NAME" >> "$GITHUB_OUTPUT"
+        shell: bash
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: RayNeo SDK ${{ github.ref_name }}
+          tag_name: ${{ steps.meta.outputs.tag_name }}
+          name: ${{ steps.meta.outputs.release_name }}
           body: ${{ steps.notes.outputs.release_body }}
           files: |
             dist/*/*.tar.gz
-
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
