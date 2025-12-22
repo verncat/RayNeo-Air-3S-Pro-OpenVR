@@ -12,97 +12,6 @@ permissions:
   contents: write # needed to create releases
 
 jobs:
-  assemble_driver:
-    name: Assemble OpenVR Driver Zip
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: false
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: dist
-      - name: Build combined driver zip
-        run: |
-          TAG=${GITHUB_REF_NAME}
-          mkdir -p steamvr_zip/rayneo/bin/win64 steamvr_zip/rayneo/bin/linux64
-
-          # Copy driver manifest with fallbacks from artifacts
-          if [ -f openvr_driver/driver.vrdrivermanifest ]; then
-            cp openvr_driver/driver.vrdrivermanifest steamvr_zip/rayneo/
-          else
-            echo "Manifest missing in repo, trying artifacts..."
-            MANIFEST_PATH=$(find dist -type f -name driver.vrdrivermanifest -print -quit 2>/dev/null || true)
-            if [ -n "$MANIFEST_PATH" ]; then
-              cp "$MANIFEST_PATH" steamvr_zip/rayneo/
-              echo "Copied manifest from $MANIFEST_PATH"
-            else
-              echo "Manifest missing everywhere"; ls -l openvr_driver || true
-            fi
-          fi
-
-          # Windows DLL: try expected path, then search broadly in artifacts
-          if [ -f dist/openvr-driver-windows-latest/rayneo/bin/win64/driver_rayneo.dll ]; then
-            cp dist/openvr-driver-windows-latest/rayneo/bin/win64/driver_rayneo.dll steamvr_zip/rayneo/bin/win64/driver_rayneo.dll
-          else
-            WIN_DLL=$(find dist -type f -name driver_rayneo.dll -print -quit 2>/dev/null || true)
-            if [ -z "$WIN_DLL" ]; then
-              # as a last resort, accept any driver DLL variant name
-              WIN_DLL=$(find dist -type f -name 'driver_*.dll' -print -quit 2>/dev/null || true)
-            fi
-            if [ -n "$WIN_DLL" ]; then
-              cp "$WIN_DLL" steamvr_zip/rayneo/bin/win64/driver_rayneo.dll || echo "Copy win64 failed"
-              echo "Copied Windows driver from $WIN_DLL"
-            else
-              echo "Windows driver dll not found; dist tree:"
-              ls -R dist/openvr-driver-windows-latest 2>/dev/null || ls -R dist || true
-            fi
-          fi
-
-          # Also include Windows libusb runtime if present in artifacts
-          WIN_USB_DLL=$(find dist -type f -name 'libusb-1.0.dll' -print -quit 2>/dev/null || true)
-          if [ -n "$WIN_USB_DLL" ]; then
-            cp "$WIN_USB_DLL" steamvr_zip/rayneo/bin/win64/libusb-1.0.dll || echo "Copy libusb-1.0.dll failed"
-            echo "Copied Windows libusb from $WIN_USB_DLL"
-          else
-            echo "Windows libusb-1.0.dll not found in artifacts"
-          fi
-
-          # Linux SO: try expected path, then search broadly in artifacts
-          if [ -f dist/openvr-driver-ubuntu-latest/rayneo/bin/linux64/driver_rayneo.so ]; then
-            cp dist/openvr-driver-ubuntu-latest/rayneo/bin/linux64/driver_rayneo.so steamvr_zip/rayneo/bin/linux64/ || echo "Linux64 driver missing"
-          else
-            LINUX_SO=$(find dist -type f -name driver_rayneo.so -print -quit 2>/dev/null || true)
-            if [ -n "$LINUX_SO" ]; then
-              cp "$LINUX_SO" steamvr_zip/rayneo/bin/linux64/driver_rayneo.so || echo "Copy linux64 failed"
-              echo "Copied Linux driver from $LINUX_SO"
-            else
-              echo "Linux driver .so not found; dist tree:"
-              ls -R dist/openvr-driver-ubuntu-latest 2>/dev/null || ls -R dist || true
-            fi
-          fi
-
-          # Also include Linux libusb runtime if present in artifacts
-          LINUX_USB_SO=$(find dist -type f -regex '.*/libusb-1\.0\.so(\.[0-9]+)?$' -print -quit 2>/dev/null || true)
-          if [ -n "$LINUX_USB_SO" ]; then
-            cp "$LINUX_USB_SO" steamvr_zip/rayneo/bin/linux64/ || echo "Copy libusb .so failed"
-            echo "Copied Linux libusb from $LINUX_USB_SO"
-          else
-            echo "Linux libusb .so not found in artifacts"
-          fi
-
-          (cd steamvr_zip && zip -r steamvr_rayneo_driver-${TAG}.zip rayneo)
-          mkdir -p dist/steamvr_driver
-          cp steamvr_zip/steamvr_rayneo_driver-${TAG}.zip dist/steamvr_driver/
-        shell: bash
-      - name: Upload combined driver zip
-        uses: actions/upload-artifact@v4
-        with:
-          name: steamvr_rayneo_driver
-          path: dist/steamvr_driver/steamvr_rayneo_driver-${{ github.ref_name }}.zip
   build:
     name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -275,18 +184,12 @@ jobs:
         with:
           name: rayneo-sdk-${{ matrix.os }}
           path: rayneo-sdk-${{ matrix.os }}.tar.gz
-      - name: Upload OpenVR driver raw artifacts
-        if: (matrix.os == 'windows-latest') || (matrix.os == 'ubuntu-latest')
-        uses: actions/upload-artifact@v4
-        with:
-          name: openvr-driver-${{ matrix.os }}
-          path: openvr_driver_artifacts/rayneo/**
 
   release:
     name: Create Release
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
-    needs: [build, assemble_driver]
+    needs: build
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -303,9 +206,7 @@ jobs:
           echo "RayNeo SDK release for tag $GITHUB_REF_NAME" >> $GITHUB_OUTPUT
           echo "Includes prebuilt binaries for Windows, macOS, and Linux." >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
-      - name: Skip assembly (already done)
-        run: echo "Driver zip assembled in assemble_driver job"
-        shell: bash
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -314,37 +215,6 @@ jobs:
           body: ${{ steps.notes.outputs.release_body }}
           files: |
             dist/*/*.tar.gz
-            dist/steamvr_driver/steamvr_rayneo_driver-*.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  release_driver:
-    name: Create SteamVR Driver Release
-    runs-on: ubuntu-latest
-    needs: assemble_driver
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: false
-      - name: Download steamvr driver artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: steamvr_rayneo_driver
-          path: dist/steamvr_driver
-      - name: Compose driver tag
-        id: drvtag
-        run: |
-          TS=$(date -u +%Y%m%d-%H%M%S)
-          SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
-          echo "tag=steamvr-driver-${TS}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
-          echo "name=SteamVR Driver ${TS}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
-      - name: Create SteamVR Driver Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.drvtag.outputs.tag }}
-          name: ${{ steps.drvtag.outputs.name }}
-          body: SteamVR driver build from ${{ github.sha }} at ${{ steps.drvtag.outputs.name }}
-          files: dist/steamvr_driver/steamvr_rayneo_driver-*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
