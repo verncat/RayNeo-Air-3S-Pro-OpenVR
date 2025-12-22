@@ -5,11 +5,11 @@ on:
     branches:
       - main
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
 
 permissions:
-  contents: write   # needed to create releases
+  contents: write # needed to create releases
 
 jobs:
   assemble_driver:
@@ -29,24 +29,53 @@ jobs:
         run: |
           TAG=${GITHUB_REF_NAME}
           mkdir -p steamvr_zip/rayneo/bin/win64 steamvr_zip/rayneo/bin/linux64
+
+          # Copy driver manifest with fallbacks from artifacts
           if [ -f openvr_driver/driver.vrdrivermanifest ]; then
             cp openvr_driver/driver.vrdrivermanifest steamvr_zip/rayneo/
           else
-            echo "Manifest missing"; ls -l openvr_driver || true
+            echo "Manifest missing in repo, trying artifacts..."
+            MANIFEST_PATH=$(find dist -type f -name driver.vrdrivermanifest -print -quit 2>/dev/null || true)
+            if [ -n "$MANIFEST_PATH" ]; then
+              cp "$MANIFEST_PATH" steamvr_zip/rayneo/
+              echo "Copied manifest from $MANIFEST_PATH"
+            else
+              echo "Manifest missing everywhere"; ls -l openvr_driver || true
+            fi
           fi
+
+          # Windows DLL: try expected path, then search broadly in artifacts
           if [ -f dist/openvr-driver-windows-latest/rayneo/bin/win64/driver_rayneo.dll ]; then
             cp dist/openvr-driver-windows-latest/rayneo/bin/win64/driver_rayneo.dll steamvr_zip/rayneo/bin/win64/driver_rayneo.dll
           else
-            WIN_DLL=$(find dist/openvr-driver-windows-latest -type f -name driver_rayneo.dll -print -quit 2>/dev/null || true)
+            WIN_DLL=$(find dist -type f -name driver_rayneo.dll -print -quit 2>/dev/null || true)
+            if [ -z "$WIN_DLL" ]; then
+              # as a last resort, accept any driver DLL variant name
+              WIN_DLL=$(find dist -type f -name 'driver_*.dll' -print -quit 2>/dev/null || true)
+            fi
             if [ -n "$WIN_DLL" ]; then
               cp "$WIN_DLL" steamvr_zip/rayneo/bin/win64/driver_rayneo.dll || echo "Copy win64 failed"
+              echo "Copied Windows driver from $WIN_DLL"
             else
-              echo "Windows driver dll not found; tree:"; ls -R dist/openvr-driver-windows-latest || true
+              echo "Windows driver dll not found; dist tree:"
+              ls -R dist/openvr-driver-windows-latest 2>/dev/null || ls -R dist || true
             fi
           fi
-          if [ -d dist/openvr-driver-ubuntu-latest/rayneo/bin/linux64 ]; then
+
+          # Linux SO: try expected path, then search broadly in artifacts
+          if [ -f dist/openvr-driver-ubuntu-latest/rayneo/bin/linux64/driver_rayneo.so ]; then
             cp dist/openvr-driver-ubuntu-latest/rayneo/bin/linux64/driver_rayneo.so steamvr_zip/rayneo/bin/linux64/ || echo "Linux64 driver missing"
+          else
+            LINUX_SO=$(find dist -type f -name driver_rayneo.so -print -quit 2>/dev/null || true)
+            if [ -n "$LINUX_SO" ]; then
+              cp "$LINUX_SO" steamvr_zip/rayneo/bin/linux64/driver_rayneo.so || echo "Copy linux64 failed"
+              echo "Copied Linux driver from $LINUX_SO"
+            else
+              echo "Linux driver .so not found; dist tree:"
+              ls -R dist/openvr-driver-ubuntu-latest 2>/dev/null || ls -R dist || true
+            fi
           fi
+
           (cd steamvr_zip && zip -r steamvr_rayneo_driver-${TAG}.zip rayneo)
           mkdir -p dist/steamvr_driver
           cp steamvr_zip/steamvr_rayneo_driver-${TAG}.zip dist/steamvr_driver/
@@ -77,7 +106,7 @@ jobs:
         if: startsWith(matrix.os, 'windows')
         uses: actions/setup-node@v4
         with:
-          node-version: '20.x'
+          node-version: "20.x"
         # Using setup-node to ensure Git is modern; vcpkg bootstrap uses Git.
       - name: Bootstrap vcpkg (Windows)
         if: startsWith(matrix.os, 'windows')
