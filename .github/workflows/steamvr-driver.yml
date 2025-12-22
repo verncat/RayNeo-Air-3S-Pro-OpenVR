@@ -123,9 +123,11 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           set -e
+          # Ensure target directory exists before copying driver or libusb
+          mkdir -p openvr_driver_artifacts/rayneo/bin/linux64
+
           DRIVER_SO=$(find build/openvr_driver -type f -name driver_rayneo.so -print -quit || true)
           if [ -n "$DRIVER_SO" ]; then
-            mkdir -p openvr_driver_artifacts/rayneo/bin/linux64
             cp "$DRIVER_SO" openvr_driver_artifacts/rayneo/bin/linux64/driver_rayneo.so
             echo "Found Linux driver at $DRIVER_SO"
           else
