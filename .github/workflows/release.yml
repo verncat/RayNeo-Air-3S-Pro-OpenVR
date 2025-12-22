@@ -34,11 +34,15 @@ jobs:
           else
             echo "Manifest missing"; ls -l openvr_driver || true
           fi
-          WIN_DLL=$(find dist -type f -path "*openvr-driver-windows-latest*driver_rayneo.dll" -print -quit || true)
-          if [ -n "$WIN_DLL" ]; then
-            cp "$WIN_DLL" steamvr_zip/rayneo/bin/win64/driver_rayneo.dll || echo "Copy win64 failed"
+          if [ -f dist/openvr-driver-windows-latest/rayneo/bin/win64/driver_rayneo.dll ]; then
+            cp dist/openvr-driver-windows-latest/rayneo/bin/win64/driver_rayneo.dll steamvr_zip/rayneo/bin/win64/driver_rayneo.dll
           else
-            echo "Windows driver dll not found; listing dist:"; ls -R dist/openvr-driver-windows-latest || true
+            WIN_DLL=$(find dist/openvr-driver-windows-latest -type f -name driver_rayneo.dll -print -quit 2>/dev/null || true)
+            if [ -n "$WIN_DLL" ]; then
+              cp "$WIN_DLL" steamvr_zip/rayneo/bin/win64/driver_rayneo.dll || echo "Copy win64 failed"
+            else
+              echo "Windows driver dll not found; tree:"; ls -R dist/openvr-driver-windows-latest || true
+            fi
           fi
           if [ -d dist/openvr-driver-ubuntu-latest/rayneo/bin/linux64 ]; then
             cp dist/openvr-driver-ubuntu-latest/rayneo/bin/linux64/driver_rayneo.so steamvr_zip/rayneo/bin/linux64/ || echo "Linux64 driver missing"
@@ -191,7 +195,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: openvr-driver-${{ matrix.os }}
-          path: openvr_driver_artifacts/**
+          path: openvr_driver_artifacts/rayneo/**
 
   release:
     name: Create Release
