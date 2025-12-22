@@ -62,6 +62,15 @@ jobs:
             fi
           fi
 
+          # Also include Windows libusb runtime if present in artifacts
+          WIN_USB_DLL=$(find dist -type f -name 'libusb-1.0.dll' -print -quit 2>/dev/null || true)
+          if [ -n "$WIN_USB_DLL" ]; then
+            cp "$WIN_USB_DLL" steamvr_zip/rayneo/bin/win64/libusb-1.0.dll || echo "Copy libusb-1.0.dll failed"
+            echo "Copied Windows libusb from $WIN_USB_DLL"
+          else
+            echo "Windows libusb-1.0.dll not found in artifacts"
+          fi
+
           # Linux SO: try expected path, then search broadly in artifacts
           if [ -f dist/openvr-driver-ubuntu-latest/rayneo/bin/linux64/driver_rayneo.so ]; then
             cp dist/openvr-driver-ubuntu-latest/rayneo/bin/linux64/driver_rayneo.so steamvr_zip/rayneo/bin/linux64/ || echo "Linux64 driver missing"
@@ -74,6 +83,15 @@ jobs:
               echo "Linux driver .so not found; dist tree:"
               ls -R dist/openvr-driver-ubuntu-latest 2>/dev/null || ls -R dist || true
             fi
+          fi
+
+          # Also include Linux libusb runtime if present in artifacts
+          LINUX_USB_SO=$(find dist -type f -regex '.*/libusb-1\.0\.so(\.[0-9]+)?$' -print -quit 2>/dev/null || true)
+          if [ -n "$LINUX_USB_SO" ]; then
+            cp "$LINUX_USB_SO" steamvr_zip/rayneo/bin/linux64/ || echo "Copy libusb .so failed"
+            echo "Copied Linux libusb from $LINUX_USB_SO"
+          else
+            echo "Linux libusb .so not found in artifacts"
           fi
 
           (cd steamvr_zip && zip -r steamvr_rayneo_driver-${TAG}.zip rayneo)
@@ -184,6 +202,32 @@ jobs:
               mkdir -p openvr_driver_artifacts/rayneo/bin/win64
               cp "$WIN_DRIVER" openvr_driver_artifacts/rayneo/bin/win64/driver_rayneo.dll
               echo "Found Windows driver at $WIN_DRIVER"
+              # Bundle libusb runtime (Windows) from vcpkg into driver artifacts
+              VCPKG_POSIX="${VCPKG_ROOT//\\//}"
+              VCPKG_INSTALLED_POSIX="${VCPKG_INSTALLED_DIR//\\//}"
+              CANDIDATES=()
+              if [ -n "$VCPKG_INSTALLED_POSIX" ]; then
+                CANDIDATES+=("$VCPKG_INSTALLED_POSIX/x64-windows/bin/libusb-1.0.dll")
+                CANDIDATES+=("$VCPKG_INSTALLED_POSIX/x64-windows/debug/bin/libusb-1.0.dll")
+              fi
+              if [ -n "$VCPKG_POSIX" ]; then
+                CANDIDATES+=("$VCPKG_POSIX/installed/x64-windows/bin/libusb-1.0.dll")
+                CANDIDATES+=("$VCPKG_POSIX/installed/x64-windows/debug/bin/libusb-1.0.dll")
+                CANDIDATES+=("$VCPKG_POSIX/packages/libusb_x64-windows/bin/libusb-1.0.dll")
+                CANDIDATES+=("$VCPKG_POSIX/packages/libusb_x64-windows/debug/bin/libusb-1.0.dll")
+              fi
+              WIN_USB=""
+              for p in "${CANDIDATES[@]}"; do
+                if [ -f "$p" ]; then WIN_USB="$p"; break; fi
+              done
+              if [ -z "$WIN_USB" ]; then
+                WIN_USB=$(find "${VCPKG_POSIX:-.}" -type f -iname "libusb-1.0.dll" -print -quit 2>/dev/null || true)
+              fi
+              if [ -n "$WIN_USB" ]; then
+                cp "$WIN_USB" openvr_driver_artifacts/rayneo/bin/win64/ || echo "Copy libusb-1.0.dll failed"
+              else
+                echo "libusb-1.0.dll not found in vcpkg installation"
+              fi
             else
               echo "OpenVR Windows driver not found; tree of build/openvr_driver:";
               ls -R build/openvr_driver || true
@@ -198,6 +242,18 @@ jobs:
               mkdir -p openvr_driver_artifacts/rayneo/bin/linux64
               cp "$DRIVER_SO" openvr_driver_artifacts/rayneo/bin/linux64/driver_rayneo.so
               echo "Found Linux driver at $DRIVER_SO"
+              # Bundle libusb runtime (Linux) into driver artifacts
+              USB_SO="/usr/lib/x86_64-linux-gnu/libusb-1.0.so.0"
+              if [ -f "$USB_SO" ]; then
+                cp "$USB_SO" openvr_driver_artifacts/rayneo/bin/linux64/ || echo "Copy libusb .so failed"
+              else
+                USB_SO=$(ldconfig -p | awk '/libusb-1\.0\.so(\.0)?/ {print $NF; exit}' || true)
+                if [ -n "$USB_SO" ] && [ -f "$USB_SO" ]; then
+                  cp "$USB_SO" openvr_driver_artifacts/rayneo/bin/linux64/ || echo "Copy libusb .so failed"
+                else
+                  echo "libusb runtime .so not found on system"
+                fi
+              fi
             else
               echo "OpenVR Linux driver not found; listing build/openvr_driver:";
               ls -R build/openvr_driver || true
@@ -259,5 +315,36 @@ jobs:
           files: |
             dist/*/*.tar.gz
             dist/steamvr_driver/steamvr_rayneo_driver-*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  release_driver:
+    name: Create SteamVR Driver Release
+    runs-on: ubuntu-latest
+    needs: assemble_driver
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Download steamvr driver artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: steamvr_rayneo_driver
+          path: dist/steamvr_driver
+      - name: Compose driver tag
+        id: drvtag
+        run: |
+          TS=$(date -u +%Y%m%d-%H%M%S)
+          SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
+          echo "tag=steamvr-driver-${TS}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "name=SteamVR Driver ${TS}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+      - name: Create SteamVR Driver Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.drvtag.outputs.tag }}
+          name: ${{ steps.drvtag.outputs.name }}
+          body: SteamVR driver build from ${{ github.sha }} at ${{ steps.drvtag.outputs.name }}
+          files: dist/steamvr_driver/steamvr_rayneo_driver-*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
