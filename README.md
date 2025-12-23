@@ -1,13 +1,3 @@
-# Downloads
-
-SDK (latest assets):
-- Windows: https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR/releases/latest/download/rayneo-sdk-windows-latest.tar.gz
-- macOS: https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR/releases/latest/download/rayneo-sdk-macos-latest.tar.gz
-- Linux: https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR/releases/latest/download/rayneo-sdk-ubuntu-latest.tar.gz
-
-SteamVR Driver (latest asset):
-- Direct: https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR/releases/latest/download/steamvr_rayneo_driver-latest.zip
-
 # RayNeo SDK (Work-in-Progress)
 
 A lightweight C/C++ SDK and examples for interacting with **RayNeo Air3s Pro** (and probably other RayNeo's) devices. 
@@ -32,6 +22,19 @@ The project currently focuses on:
 - Optional OpenVR stub driver prototype (if enabled)
 
 > NOTE: This repository is evolving. Some components (e.g. higher-level service logic, richer device info parsing, error reporting) are intentionally minimal.
+
+## Download prebuilt Binaries
+
+**SDK:**
+[![Build & Release RayNeo SDK](https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR/actions/workflows/release.yml/badge.svg)](https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR/actions/workflows/release.yml) 
+[Windows](https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR/releases/latest/download/rayneo-sdk-windows-latest.tar.gz)
+[MacOS](https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR/releases/latest/download/rayneo-sdk-macos-latest.tar.gz)
+[Linux](https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR/releases/latest/download/rayneo-sdk-ubuntu-latest.tar.gz)
+
+**SteamVR Driver:**
+[![SteamVR Driver Build & Release](https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR/actions/workflows/steamvr-driver.yml/badge.svg)](https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR/actions/workflows/steamvr-driver.yml)
+[Download Linux64+Win64](https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR/releases/latest/download/steamvr_rayneo_driver-latest.zip)
+
 
 ## Repository Layout
 
@@ -115,4 +118,3 @@ PRs / patches welcome once the initial API surface stabilizes. Please:
 1. Keep changes platform-agnostic where possible
 2. Add comments for non-obvious protocol fields
 3. Avoid introducing heavy dependencies without discussion
-
