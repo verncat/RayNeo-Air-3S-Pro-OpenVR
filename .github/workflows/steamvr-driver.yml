@@ -249,6 +249,7 @@ jobs:
           (cd steamvr_zip && zip -r "$ZIP_NAME" rayneo)
           mkdir -p dist/steamvr_driver
           cp "steamvr_zip/$ZIP_NAME" dist/steamvr_driver/
+          cp "steamvr_zip/$ZIP_NAME" dist/steamvr_driver/steamvr_rayneo_driver-latest.zip
         shell: bash
 
       - name: Upload combined driver zip
@@ -274,6 +275,8 @@ jobs:
           tag_name: ${{ needs.assemble.outputs.tag }}
           name: ${{ needs.assemble.outputs.release_name }}
           body: SteamVR driver build from ${{ github.sha }} at ${{ needs.assemble.outputs.release_name }}
-          files: dist/steamvr_driver/${{ needs.assemble.outputs.zip_name }}
+          files: |
+            dist/steamvr_driver/${{ needs.assemble.outputs.zip_name }}
+            dist/steamvr_driver/steamvr_rayneo_driver-latest.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
