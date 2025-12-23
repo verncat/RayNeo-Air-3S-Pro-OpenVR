@@ -26,13 +26,17 @@ The project currently focuses on:
 ## Download prebuilt Binaries
 
 **SDK:**
+
 [![Build & Release RayNeo SDK](https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR/actions/workflows/release.yml/badge.svg)](https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR/actions/workflows/release.yml) 
+
 [Windows](https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR/releases/latest/download/rayneo-sdk-windows-latest.tar.gz)
 [MacOS](https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR/releases/latest/download/rayneo-sdk-macos-latest.tar.gz)
 [Linux](https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR/releases/latest/download/rayneo-sdk-ubuntu-latest.tar.gz)
 
 **SteamVR Driver:**
+
 [![SteamVR Driver Build & Release](https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR/actions/workflows/steamvr-driver.yml/badge.svg)](https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR/actions/workflows/steamvr-driver.yml)
+
 [Download Linux64+Win64](https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR/releases/latest/download/steamvr_rayneo_driver-latest.zip)
 
 
