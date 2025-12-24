@@ -34,7 +34,9 @@ The project currently focuses on:
 [Linux](https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR/releases/latest/download/rayneo-sdk-ubuntu-latest.tar.gz)
 
 **SteamVR Driver:**
+New driver has moved to separate repo: https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR-Driver
 
+Old driver:
 [![SteamVR Driver Build & Release](https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR/actions/workflows/steamvr-driver.yml/badge.svg)](https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR/actions/workflows/steamvr-driver.yml)
 
 [Download Linux64+Win64](https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR/releases/latest/download/steamvr_rayneo_driver-latest.zip)
