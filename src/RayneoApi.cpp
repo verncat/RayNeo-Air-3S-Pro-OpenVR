@@ -898,30 +898,20 @@ RAYNEO_Result Rayneo_Start(RAYNEO_Context ctx, uint32_t /*serviceFlags*/)
         };
         size_t inSize = ctx->epInMaxPacket ? ctx->epInMaxPacket : 64;
         if (inSize < 64) inSize = 64;
-        std::vector<uint8_t> *bufferHolder = new std::vector<uint8_t>(inSize); // freed on worker exit
+        auto bufferHolder = std::make_unique<std::vector<uint8_t>>(inSize); // freed on worker exit
         libusb_fill_interrupt_transfer(ctx->inTransfer, ctx->handle, ctx->epIn, bufferHolder->data(), (int)inSize, transferCallback, ctx, 0);
         ctx->transferActive.store(true);
         ctx->transferDone.store(false);
         ctx->transferResubmit.store(true);
         int submitRc = libusb_submit_transfer(ctx->inTransfer);
         (void)submitRc;
-        ctx->worker = std::thread([ctx, bufferHolder]
+        ctx->worker = std::thread([ctx]() 
         {
             while (!ctx->stopWorker.load())
             {
                 timeval tv{0, 100000}; // 100ms
                 libusb_handle_events_timeout_completed(ctx->usbCtx, &tv, nullptr);
             }
-            ctx->transferResubmit.store(false);
-            if (ctx->inTransfer && ctx->transferActive.load())
-            {
-                for (int i = 0; i < 50 && !ctx->transferDone.load(); ++i)
-                {
-                    timeval tv{0, 20000};
-                    libusb_handle_events_timeout_completed(ctx->usbCtx, &tv, nullptr);
-                }
-            }
-            delete bufferHolder;
         });
     }
 #endif
@@ -932,6 +922,18 @@ RAYNEO_Result Rayneo_Stop(RAYNEO_Context ctx)
 {
     if (!ctx)
         return RAYNEO_ERR_INVALID_ARG;
+
+    // Prevent deadlock if Rayneo_Stop is called from the event callback (which runs on the worker thread)
+    if (ctx->worker.joinable() && std::this_thread::get_id() == ctx->worker.get_id())
+    {
+        ctx->stopIssued.store(true);
+        ctx->running.store(false);
+        ctx->stopWorker.store(true);
+        // We cannot join() ourselves. The worker will exit its loop eventually since stopWorker is true,
+        // but we can't safely clean up resources here that the worker might still be using.
+        return RAYNEO_ERR_BUSY;
+    }
+
     if (ctx->stopIssued.exchange(true))
         return RAYNEO_OK;
     bool was = ctx->running.exchange(false);
@@ -939,6 +941,13 @@ RAYNEO_Result Rayneo_Stop(RAYNEO_Context ctx)
     if (was)
     {
         ctx->stopWorker.store(true);
+#ifndef __APPLE__
+        // Cancel pending transfer to ensure worker loop wakes up immediately
+        if (ctx->inTransfer && ctx->transferActive.load())
+        {
+            libusb_cancel_transfer(ctx->inTransfer);
+        }
+#endif
 #ifdef __APPLE__
         if (ctx->hidRunLoop)
             CFRunLoopWakeUp(ctx->hidRunLoop);
@@ -946,6 +955,11 @@ RAYNEO_Result Rayneo_Stop(RAYNEO_Context ctx)
         if (ctx->worker.joinable())
             ctx->worker.join();
 #ifndef __APPLE__
+        if (ctx->inTransfer)
+        {
+            libusb_free_transfer(ctx->inTransfer);
+            ctx->inTransfer = nullptr;
+        }
         if (ctx->handle && ctx->interfaceNumber >= 0)
             libusb_release_interface(ctx->handle, ctx->interfaceNumber);
         if (ctx->handle)
@@ -957,11 +971,6 @@ RAYNEO_Result Rayneo_Stop(RAYNEO_Context ctx)
         {
             libusb_exit(ctx->usbCtx);
             ctx->usbCtx = nullptr;
-        }
-        if (ctx->inTransfer)
-        {
-            libusb_free_transfer(ctx->inTransfer);
-            ctx->inTransfer = nullptr;
         }
 #else
         ctx->macReadyStatus = RAYNEO_OK;
