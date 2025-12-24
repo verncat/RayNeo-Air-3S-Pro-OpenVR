@@ -278,9 +278,54 @@ static void processInboundFrame(RayneoContext__ *ctx, const uint8_t *buf, size_t
             evt.data.notify.code = RAYNEO_NOTIFY_BUTTON;
             enqueueEvent(ctx, evt);
             return;
+        } else if (value == 0x59){ // todo: remove magic number
+            RAYNEO_Event evt{};
+            evt.type = RAYNEO_EVENT_NOTIFY;
+            evt.seq = ++ctx->seq;
+            evt.data.notify.code = RAYNEO_NOTIFY_BUTTON; // Probably is also a button notify, but in 3d mode
+            enqueueEvent(ctx, evt);
+            return;
+        } else if (value == kCmdVolumeUp){
+            RAYNEO_Event evt{};
+            evt.type = RAYNEO_EVENT_NOTIFY;
+            evt.seq = ++ctx->seq;
+            evt.data.notify.code = RAYNEO_NOTIFY_BUTTON_VOLUME_DOWN; // Minus button notify
+            enqueueEvent(ctx, evt);
+            return;
+        } else if (value == kCmdVolumeDown){
+            RAYNEO_Event evt{};
+            evt.type = RAYNEO_EVENT_NOTIFY;
+            evt.seq = ++ctx->seq;
+            evt.data.notify.code = RAYNEO_NOTIFY_BUTTON_VOLUME_UP; // Plus button notify
+            enqueueEvent(ctx, evt);
+            return;
+        } else if (value == 0x09){ // todo: remove magic number
+            RAYNEO_Event evt{};
+            evt.type = RAYNEO_EVENT_NOTIFY;
+            evt.seq = ++ctx->seq;
+            evt.data.notify.code = RAYNEO_NOTIFY_BUTTON_BRIGHTNESS;
+            enqueueEvent(ctx, evt);
+            return;
+        } else if (value == kCmdImuOff){
+            RAYNEO_Event evt{};
+            evt.type = RAYNEO_EVENT_NOTIFY;
+            evt.seq = ++ctx->seq;
+            evt.data.notify.code = RAYNEO_NOTIFY_IMU_OFF;
+            enqueueEvent(ctx, evt);
+            return;
+
+        } else if (value == kCmdImuOn){
+            RAYNEO_Event evt{};
+            evt.type = RAYNEO_EVENT_NOTIFY;
+            evt.seq = ++ctx->seq;
+            evt.data.notify.code = RAYNEO_NOTIFY_IMU_ON;
+            enqueueEvent(ctx, evt);
+            return;
+
         } else if (value != 0) {
             printf("[SimpleClient] Unknown Notify? 0x%02X\n", value);
         }
+
         if (need(12))
         {
             std::memcpy(info.cpuid, p + off, 12);
