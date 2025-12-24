@@ -5,6 +5,20 @@
 
 #include "rayneo_api.h"
 
+static const char* Rayneo_NotifyCodeToString(int code) {
+    switch (code) {
+        case RAYNEO_NOTIFY_SLEEP: return "SLEEP";
+        case RAYNEO_NOTIFY_WAKE: return "WAKE";
+        case RAYNEO_NOTIFY_BUTTON: return "BUTTON";
+        case RAYNEO_NOTIFY_BUTTON_VOLUME_UP: return "VOLUME_UP BUTTON";
+        case RAYNEO_NOTIFY_BUTTON_VOLUME_DOWN: return "VOLUME_DOWN BUTTON";
+        case RAYNEO_NOTIFY_BUTTON_BRIGHTNESS: return "BRIGHTNESS BUTTON";
+        case RAYNEO_NOTIFY_IMU_OFF: return "IMU_OFF";
+        case RAYNEO_NOTIFY_IMU_ON: return "IMU_ON";
+        default: return "UNKNOWN";
+    }
+}
+
 int main() {
     std::cout << "RayNeo simple example (C API)\n";
     std::cout << "API version: " << Rayneo_GetApiVersion() << "\n";
@@ -36,13 +50,13 @@ int main() {
         auto rc = Rayneo_PollEvent(ctx, &evt, 500); // ждём события до 500мс
         if (rc == RAYNEO_OK) {
             if (evt.type == RAYNEO_EVENT_IMU_SAMPLE) {
-                std::cout << "IMU tick=" << evt.data.imu.tick
-                          << " acc=" << evt.data.imu.acc[0] << "," << evt.data.imu.acc[1] << "," << evt.data.imu.acc[2]
-                          << " gyro(dps)=" << evt.data.imu.gyroDps[0] << "," << evt.data.imu.gyroDps[1] << "," << evt.data.imu.gyroDps[2]
-                          << " temp=" << evt.data.imu.temperature
-                          << " psensor=" << evt.data.imu.psensor
-                          << " lsensor=" << evt.data.imu.lsensor
-                          << std::endl;
+                // std::cout << "IMU tick=" << evt.data.imu.tick
+                //           << " acc=" << evt.data.imu.acc[0] << "," << evt.data.imu.acc[1] << "," << evt.data.imu.acc[2]
+                //           << " gyro(dps)=" << evt.data.imu.gyroDps[0] << "," << evt.data.imu.gyroDps[1] << "," << evt.data.imu.gyroDps[2]
+                //           << " temp=" << evt.data.imu.temperature
+                //           << " psensor=" << evt.data.imu.psensor
+                //           << " lsensor=" << evt.data.imu.lsensor
+                //           << std::endl;
             } else if (evt.type == RAYNEO_EVENT_DEVICE_INFO) {
                 const auto &d = evt.data.info;
                 std::cout << "DeviceInfo:\n"
@@ -74,6 +88,7 @@ int main() {
                 std::cout << "Device attached" << std::endl;
             } else if (evt.type == RAYNEO_EVENT_NOTIFY) {
                 std::cout << "NOTIFY code=0x" << std::hex << evt.data.notify.code << std::dec
+                          << " (" << Rayneo_NotifyCodeToString(evt.data.notify.code) << ")"
                           << " message=" << evt.data.notify.message << std::endl;
             } else if (evt.type == RAYNEO_EVENT_LOG) {
                 // Прочие логи
@@ -92,8 +107,7 @@ int main() {
     Rayneo_DisableImu(ctx);
     Rayneo_DisplaySet2D(ctx);
 
-    // Rayneo_Destroy сам вызывает Rayneo_Stop (двойной Stop может крашиться на некоторых версиях)
-    // Rayneo_Destroy(ctx);
+    Rayneo_Stop(ctx);
     std::cout << "End main\n";
     return 0;
 }
