@@ -27,7 +27,8 @@ extern "C" {
 #define RAYNEO_API_VERSION_MAJOR 1
 // Minor 1: added structured fields to RAYNEO_DeviceInfoMini (backward compatible: raw[] still first)
 // Minor 2: added RAYNEO_EVENT_NOTIFY (sleep/wake notifications) and notify union member
-#define RAYNEO_API_VERSION_MINOR 2 // 1.2: added RAYNEO_EVENT_NOTIFY (sleep/wake) and notify union member
+// Minor 3: added Rayneo_SetTargetInterface and RAYNEO_NOTIFY_BUTTON_SPATIAL_MODE
+#define RAYNEO_API_VERSION_MINOR 3
 #define RAYNEO_API_VERSION ((RAYNEO_API_VERSION_MAJOR << 16) | (RAYNEO_API_VERSION_MINOR & 0xFFFF))
 
 RAYNEO_API unsigned int Rayneo_GetApiVersion(void); // returns packed version
@@ -69,6 +70,7 @@ typedef enum RAYNEO_EventType {
     RAYNEO_NOTIFY_BUTTON_BRIGHTNESS     = 12,
     RAYNEO_NOTIFY_IMU_ON          = 13,
     RAYNEO_NOTIFY_IMU_OFF         = 14,
+    RAYNEO_NOTIFY_BUTTON_SPATIAL_MODE = 15,
 } RAYNEO_EventType;
 
 typedef struct RAYNEO_ImuSample {
@@ -147,6 +149,8 @@ RAYNEO_API void          Rayneo_Destroy(RAYNEO_Context ctx);
 
 // Configuration (call before Start). If unset, defaults may be used.
 RAYNEO_API RAYNEO_Result Rayneo_SetTargetVidPid(RAYNEO_Context ctx, uint16_t vid, uint16_t pid);
+// Select a USB interface on libusb platforms. -1 keeps automatic selection.
+RAYNEO_API RAYNEO_Result Rayneo_SetTargetInterface(RAYNEO_Context ctx, int interfaceNumber);
 RAYNEO_API RAYNEO_Result Rayneo_SetEventCallback(RAYNEO_Context ctx, RAYNEO_EventCallback cb, void* user);
 RAYNEO_API RAYNEO_Result Rayneo_SetLogLevel(int level); // global/simple; 0=errors .. 3=debug
 
