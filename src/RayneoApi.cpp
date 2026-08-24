@@ -49,6 +49,7 @@ struct RayneoContext__
 #ifndef __APPLE__
     libusb_context *usbCtx{nullptr};
     libusb_device_handle *handle{nullptr};
+    int targetInterfaceNumber{-1};
     int interfaceNumber{-1};
     int altSetting{-1};
     uint8_t epIn{0};
@@ -57,6 +58,7 @@ struct RayneoContext__
     bool hasInterrupt{false};
     // async interrupt transfer state
     libusb_transfer *inTransfer{nullptr};
+    std::vector<uint8_t> inBuffer;
     std::atomic<bool> transferActive{false};
     std::atomic<bool> transferDone{false};
     std::atomic<bool> transferResubmit{false};
@@ -150,6 +152,10 @@ enum FXRUsbCommand {
     kCmdUsbCommandPARGESDump = 0xCB,
     kCmdTimeSynchronize = 0xE1, //设备间时钟同步
 };
+
+static constexpr uint16_t RAYNEO_GT_VID = 0x3941;
+static constexpr uint16_t RAYNEO_GT_PID = 0xAF50;
+static constexpr uint8_t RAYNEO_GT_NOTIFY_SPATIAL_MODE = 0x08;
 
 static void enqueueEvent(RayneoContext__ *ctx, const RAYNEO_Event &evt);
 
@@ -320,6 +326,21 @@ static void processInboundFrame(RayneoContext__ *ctx, const uint8_t *buf, size_t
             evt.seq = ++ctx->seq;
             evt.data.notify.code = RAYNEO_NOTIFY_IMU_ON;
             enqueueEvent(ctx, evt);
+            return;
+
+        } else if (value == RAYNEO_GT_NOTIFY_SPATIAL_MODE &&
+                   ctx->vid == RAYNEO_GT_VID &&
+                   ctx->pid == RAYNEO_GT_PID) {
+            RAYNEO_Event evt{};
+            evt.type = RAYNEO_EVENT_NOTIFY;
+            evt.seq = ++ctx->seq;
+            evt.data.notify.code = RAYNEO_NOTIFY_BUTTON_SPATIAL_MODE;
+            enqueueEvent(ctx, evt);
+            return;
+
+        } else if (value == kCmdDisplay3dMode ||
+                   value == kCmdDisplay2dMode ||
+                   value == kCmdVolumeSet) {
             return;
 
         } else if (value != 0) {
@@ -752,6 +773,22 @@ RAYNEO_Result Rayneo_SetTargetVidPid(RAYNEO_Context ctx, uint16_t vid, uint16_t 
     return RAYNEO_OK;
 }
 
+RAYNEO_Result Rayneo_SetTargetInterface(RAYNEO_Context ctx, int interfaceNumber)
+{
+    if (!ctx)
+        return RAYNEO_ERR_INVALID_ARG;
+    if (ctx->running.load())
+        return RAYNEO_ERR_BUSY;
+    if (interfaceNumber < -1 || interfaceNumber > 255)
+        return RAYNEO_ERR_INVALID_ARG;
+#ifdef __APPLE__
+    return (interfaceNumber == -1) ? RAYNEO_OK : RAYNEO_ERR_UNSUPPORTED;
+#else
+    ctx->targetInterfaceNumber = interfaceNumber;
+    return RAYNEO_OK;
+#endif
+}
+
 RAYNEO_Result Rayneo_SetEventCallback(RAYNEO_Context ctx, RAYNEO_EventCallback cb, void *user)
 {
     if (!ctx)
@@ -815,7 +852,14 @@ RAYNEO_Result Rayneo_Start(RAYNEO_Context ctx, uint32_t /*serviceFlags*/)
         return RAYNEO_ERR_IO;
     }
     libusb_free_device_list(list, 1);
-    // Find first interface with HID class (0x03) or fallback first
+    ctx->interfaceNumber = -1;
+    ctx->altSetting = -1;
+    ctx->epIn = 0;
+    ctx->epOut = 0;
+    ctx->epInMaxPacket = 64;
+    ctx->hasInterrupt = false;
+
+    const bool exactTarget = ctx->targetInterfaceNumber >= 0;
     libusb_config_descriptor *cfg = nullptr; // libusb_get_active_config_descriptor expects non-const**
     if (libusb_get_active_config_descriptor(libusb_get_device(ctx->handle), &cfg) == 0 && cfg)
     {
@@ -825,31 +869,48 @@ RAYNEO_Result Rayneo_Start(RAYNEO_Context ctx, uint32_t /*serviceFlags*/)
             for (int a = 0; a < iface.num_altsetting && ctx->interfaceNumber < 0; a++)
             {
                 const libusb_interface_descriptor &id = iface.altsetting[a];
-                // Prefer HID class (0x03); if not found we will still pick first available
-                if (id.bInterfaceClass == 0x03 || ctx->interfaceNumber < 0)
+                if (exactTarget && id.bInterfaceNumber != ctx->targetInterfaceNumber)
+                    continue;
+
+                uint8_t epIn = 0;
+                uint8_t epOut = 0;
+                uint16_t epInMaxPacket = 64;
+                for (uint8_t e = 0; e < id.bNumEndpoints; e++)
                 {
-                    ctx->interfaceNumber = id.bInterfaceNumber;
-                    ctx->altSetting = id.bAlternateSetting;
-                    for (uint8_t e = 0; e < id.bNumEndpoints; e++)
+                    const libusb_endpoint_descriptor &epd = id.endpoint[e];
+                    if ((epd.bmAttributes & 0x3) == 3) // interrupt
                     {
-                        const libusb_endpoint_descriptor &epd = id.endpoint[e];
-                        if ((epd.bmAttributes & 0x3) == 3) // interrupt
+                        if (epd.bEndpointAddress & 0x80)
                         {
-                            if (epd.bEndpointAddress & 0x80)
-                            {
-                                ctx->epIn = epd.bEndpointAddress;
-                                ctx->epInMaxPacket = epd.wMaxPacketSize;
-                            }
-                            else
-                                ctx->epOut = epd.bEndpointAddress;
+                            epIn = epd.bEndpointAddress;
+                            epInMaxPacket = epd.wMaxPacketSize;
                         }
+                        else
+                            epOut = epd.bEndpointAddress;
                     }
-                    ctx->hasInterrupt = (ctx->epIn || ctx->epOut);
-                    // interface selected
                 }
+
+                if (exactTarget && !epIn)
+                    continue;
+
+                ctx->interfaceNumber = id.bInterfaceNumber;
+                ctx->altSetting = id.bAlternateSetting;
+                ctx->epIn = epIn;
+                ctx->epOut = epOut;
+                ctx->epInMaxPacket = epInMaxPacket;
+                ctx->hasInterrupt = (epIn || epOut);
             }
         }
         libusb_free_config_descriptor(cfg);
+    }
+    if (exactTarget && ctx->interfaceNumber < 0)
+    {
+        libusb_close(ctx->handle);
+        ctx->handle = nullptr;
+        libusb_exit(ctx->usbCtx);
+        ctx->usbCtx = nullptr;
+        ctx->running.store(false);
+        return RAYNEO_ERR_UNSUPPORTED;
     }
     if (ctx->interfaceNumber >= 0)
     {
@@ -943,8 +1004,10 @@ RAYNEO_Result Rayneo_Start(RAYNEO_Context ctx, uint32_t /*serviceFlags*/)
         };
         size_t inSize = ctx->epInMaxPacket ? ctx->epInMaxPacket : 64;
         if (inSize < 64) inSize = 64;
-        auto bufferHolder = std::make_unique<std::vector<uint8_t>>(inSize); // freed on worker exit
-        libusb_fill_interrupt_transfer(ctx->inTransfer, ctx->handle, ctx->epIn, bufferHolder->data(), (int)inSize, transferCallback, ctx, 0);
+        ctx->inBuffer.assign(inSize, 0);
+        libusb_fill_interrupt_transfer(ctx->inTransfer, ctx->handle, ctx->epIn,
+                                       ctx->inBuffer.data(), (int)inSize,
+                                       transferCallback, ctx, 0);
         ctx->transferActive.store(true);
         ctx->transferDone.store(false);
         ctx->transferResubmit.store(true);
