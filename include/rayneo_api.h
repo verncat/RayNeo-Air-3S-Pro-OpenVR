@@ -29,6 +29,15 @@ extern "C" {
 // Minor 2: added RAYNEO_EVENT_NOTIFY (sleep/wake notifications) and notify union member
 // Minor 3: added Rayneo_SetTargetInterface and RAYNEO_NOTIFY_BUTTON_SPATIAL_MODE
 #define RAYNEO_API_VERSION_MINOR 3
+#define RAYNEO_API_VERSION_PATCH 0
+
+#define RAYNEO_STRINGIFY_IMPL(value) #value
+#define RAYNEO_STRINGIFY(value) RAYNEO_STRINGIFY_IMPL(value)
+#define RAYNEO_VERSION_STRING RAYNEO_STRINGIFY(RAYNEO_API_VERSION_MAJOR) \
+    "." RAYNEO_STRINGIFY(RAYNEO_API_VERSION_MINOR) \
+    "." RAYNEO_STRINGIFY(RAYNEO_API_VERSION_PATCH)
+
+// Preserve the packed ABI version format; patch releases do not change it.
 #define RAYNEO_API_VERSION ((RAYNEO_API_VERSION_MAJOR << 16) | (RAYNEO_API_VERSION_MINOR & 0xFFFF))
 
 RAYNEO_API unsigned int Rayneo_GetApiVersion(void); // returns packed version

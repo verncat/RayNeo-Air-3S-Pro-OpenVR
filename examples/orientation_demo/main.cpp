@@ -220,6 +220,7 @@ static void drawAxes(const Orientation &o)
 
 int main()
 {
+    SDL_SetMainReady();
     printf("RayNeo orientation demo (axes)\n");
     RAYNEO_Context ctx{};
     if (Rayneo_Create(&ctx) != RAYNEO_OK)

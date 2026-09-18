@@ -50,6 +50,10 @@ target_include_directories(openvr_stub_driver
 target_compile_features(openvr_stub_driver PRIVATE cxx_std_17)
 target_compile_options(openvr_stub_driver PRIVATE -fPIC)
 
+if (WIN32)
+    target_link_libraries(openvr_stub_driver PRIVATE setupapi)
+endif()
+
 
 # On macOS OpenVR expects a dylib; ensure correct suffix if needed
 set_target_properties(openvr_stub_driver PROPERTIES OUTPUT_NAME "driver_stub")

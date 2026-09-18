@@ -6,6 +6,9 @@ import subprocess
 import uuid
 
 
+VERSION_HEADER = "include/rayneo_api.h"
+
+
 SEMVER = re.compile(
     r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
     r"(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
@@ -18,15 +21,33 @@ def git(*args):
     return subprocess.check_output(["git", *args], text=True, encoding="utf-8").strip()
 
 
-def version_from(text):
-    values = re.findall(r"^\s*VERSION\s*=\s*([^\r\n]*)", text, re.MULTILINE)
-    if len(values) != 1 or not SEMVER.fullmatch(values[0].strip()):
-        raise ValueError(".env must contain exactly one VERSION in SemVer format (without v)")
-    return values[0].strip()
+def version_from(text, allow_missing=False):
+    text = re.sub(r"/\*.*?\*/|//[^\r\n]*", "", text, flags=re.DOTALL)
+    definitions = {}
+    for component in ("MAJOR", "MINOR", "PATCH"):
+        definitions[component] = re.findall(
+            rf"^[ \t]*#[ \t]*define[ \t]+RAYNEO_API_VERSION_{component}\b([^\r\n]*)",
+            text, re.MULTILINE,
+        )
+    # Older headers had no patch component and were not release metadata.
+    if not definitions["PATCH"] and allow_missing:
+        return None
+    components = []
+    for component, values in definitions.items():
+        value = re.fullmatch(r"[ \t]+(0|[1-9][0-9]*)[ \t]*", values[0]) if len(values) == 1 else None
+        if value is None:
+            raise ValueError(
+                f"{VERSION_HEADER} must contain exactly one decimal integer "
+                f"RAYNEO_API_VERSION_{component} (no leading zeros)"
+            )
+        if component != "PATCH" and int(value[1]) > 65535:
+            raise ValueError(f"RAYNEO_API_VERSION_{component} must fit in 16 bits")
+        components.append(value[1])
+    return ".".join(components)
 
 
 def main():
-    version = version_from(Path(".env").read_text(encoding="utf-8"))
+    version = version_from(Path(VERSION_HEADER).read_text(encoding="utf-8"))
     prefix = os.environ["TAG_PREFIX"]
     tag = f"{prefix}v{version}"
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
@@ -34,8 +55,8 @@ def main():
     if not before or set(before) == {"0"}:
         before = git("rev-parse", "HEAD^") if git("rev-list", "--count", "HEAD") != "1" else None
     previous_version = None
-    if before and ".env" in git("ls-tree", "--name-only", before, "--", ".env").splitlines():
-        previous_version = version_from(git("show", f"{before}:.env"))
+    if before and VERSION_HEADER in git("ls-tree", "--name-only", before, "--", VERSION_HEADER).splitlines():
+        previous_version = version_from(git("show", f"{before}:{VERSION_HEADER}"), allow_missing=True)
     changed = version != previous_version and tag not in git("tag", "--list").splitlines()
     body = ""
     if changed:

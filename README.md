@@ -42,6 +42,27 @@ Old driver:
 [Download Linux64+Win64](https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR/releases/latest/download/steamvr_rayneo_driver-latest.zip)
 
 
+## Release version
+
+Edit `RAYNEO_API_VERSION_MAJOR`, `RAYNEO_API_VERSION_MINOR`, and
+`RAYNEO_API_VERSION_PATCH` in `include/rayneo_api.h` to set the release SemVer
+(currently `1.3.0`). Use decimal integers without leading zeros. These three
+macros are the single source of the version; `RAYNEO_VERSION_STRING` is derived
+automatically. Major and minor must fit in 16 bits. `RAYNEO_API_VERSION` and
+`Rayneo_GetApiVersion()` retain the packed major/minor format for compatibility;
+patch is available through its macro and the version string.
+
+On pushes to `main`, SDK and SteamVR builds run only when the version differs
+from the header before the push and the corresponding release tag does not
+exist. Manual runs compare against the parent commit. Introducing the release
+macro counts as a version change; edits that keep the version unchanged do not.
+
+Tags are `sdk-v<VERSION>` and `steamvr-driver-v<VERSION>`. Release notes include
+commits since the previous reachable tag for that product and a full diff link.
+Legacy timestamp tags are supported. Without a previous tag, all commits are
+included. The three numeric macros define stable releases without prerelease
+or build suffixes.
+
 ## Repository Layout
 
 ```

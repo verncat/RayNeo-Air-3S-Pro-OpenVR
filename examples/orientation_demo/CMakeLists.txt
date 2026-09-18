@@ -15,7 +15,6 @@ target_link_libraries(RayNeoOrientationDemo PRIVATE OpenGL::GL)
 find_package(SDL2 CONFIG REQUIRED)
 target_link_libraries(RayNeoOrientationDemo
     PRIVATE
-        $<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
         $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
 )
 target_compile_definitions(RayNeoOrientationDemo PRIVATE SDL_MAIN_HANDLED)

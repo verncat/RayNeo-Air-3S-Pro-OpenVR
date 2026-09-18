@@ -13,15 +13,30 @@ meta = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(meta)
 
 
+def header(version):
+    return "\n".join(f"#define RAYNEO_API_VERSION_{name} {value}"
+                     for name, value in zip(("MAJOR", "MINOR", "PATCH"), version.split(".")))
+
+
 class ReleaseMetaTests(unittest.TestCase):
     def test_semver(self):
-        for version in ("0.0.0", "1.2.3", "1.2.3-rc.1+build.42"):
-            self.assertEqual(meta.version_from(f"VERSION={version}\n"), version)
-        for version in ("v1.0.0", "1.0", "01.0.0", "1.0.0-01", "1.0.0+", ""):
+        for version in ("0.0.0", "1.2.3", "1.3.0", "65535.65535.42"):
+            self.assertEqual(meta.version_from(header(version)), version)
+        for version in ("v1.0.0", "1.0", "01.0.0", "1.0.0-01", "1.0.0+", "", "65536.0.0", "1.65536.0", "1.0.-1"):
             with self.assertRaises(ValueError):
-                meta.version_from(f"VERSION={version}\n")
+                meta.version_from(header(version))
         with self.assertRaises(ValueError):
-            meta.version_from("VERSION=1.0.0\nVERSION=2.0.0\n")
+            meta.version_from(header("1.0.0") + '\n#define RAYNEO_API_VERSION_PATCH 1')
+
+    def test_header_comments_and_invalid_definitions(self):
+        self.assertIsNone(meta.version_from('#define RAYNEO_API_VERSION_MAJOR 1', allow_missing=True))
+        text = ('/*\n#define RAYNEO_API_VERSION_MAJOR 9\n*/\n'
+                '// #define RAYNEO_API_VERSION_PATCH 8\n' + header("1.2.3") + ' // release\n')
+        self.assertEqual(meta.version_from(text), "1.2.3")
+        for text in ('', header("1.0.OTHER"), header("1.0.0 extra"),
+                     header("1.0.0").replace('PATCH 0', 'PATCH(x) 0')):
+            with self.assertRaises(ValueError):
+                meta.version_from(text)
 
     def run_meta(self, old="1.0.0", new="1.1.0", tags=(), reachable=(), manual=False):
         calls = []
@@ -33,9 +48,11 @@ class ReleaseMetaTests(unittest.TestCase):
             if args[0] == "rev-parse":
                 return "parent"
             if args[0] == "ls-tree":
-                return ".env" if old is not None else ""
+                return meta.VERSION_HEADER if old is not None else ""
             if args[0] == "show":
-                return f"VERSION={old}"
+                if old == "legacy":
+                    return '#define RAYNEO_API_VERSION_MAJOR 1'
+                return header(old)
             if args[:2] == ("tag", "--list"):
                 return "\n".join(tags)
             if args[:2] == ("tag", "--merged"):
@@ -52,7 +69,7 @@ class ReleaseMetaTests(unittest.TestCase):
                        GITHUB_OUTPUT=str(output), GITHUB_SERVER_URL="https://github.com",
                        GITHUB_REPOSITORY="owner/repo")
             def read_text(path, **kwargs):
-                return f"VERSION={new}" if str(path) == ".env" else (
+                return header(new) if path.as_posix() == meta.VERSION_HEADER else (
                     "{}" if manual else '{"before":"before-push"}'
                 )
             with patch.dict(os.environ, env), patch.object(meta, "git", git), \
@@ -78,14 +95,25 @@ class ReleaseMetaTests(unittest.TestCase):
         self.assertEqual(result["changed"], "true")
         self.assertIn("Example commit", result["body"])
         self.assertIn("sdk-20260824-184539-c580918...sdk-v1.1.0", result["body"])
-        self.assertIn(("show", "before-push:.env"), calls)
+        self.assertIn(("show", f"before-push:{meta.VERSION_HEADER}"), calls)
 
-    def test_first_version_prerelease_and_manual(self):
-        result, calls = self.run_meta(old=None, new="1.1.0-rc.1", manual=True)
+    def test_first_version_and_manual(self):
+        result, calls = self.run_meta(old=None, new="1.3.0", manual=True)
         self.assertEqual(result["changed"], "true")
-        self.assertEqual(result["prerelease"], "true")
+        self.assertEqual(result["prerelease"], "false")
         self.assertIn(("rev-parse", "HEAD^"), calls)
         self.assertIn(("log", "--reverse", "--format=%H %s", "HEAD"), calls)
+
+    def test_existing_header_without_release_version(self):
+        result, calls = self.run_meta(old="legacy")
+        self.assertEqual(result["changed"], "true")
+        self.assertIn(("show", f"before-push:{meta.VERSION_HEADER}"), calls)
+
+    def test_patch_only_change(self):
+        result, _ = self.run_meta(old="1.3.0", new="1.3.1")
+        self.assertEqual(result["changed"], "true")
+        self.assertEqual(result["version"], "1.3.1")
+        self.assertEqual(result["tag"], "sdk-v1.3.1")
 
 
 if __name__ == "__main__":
