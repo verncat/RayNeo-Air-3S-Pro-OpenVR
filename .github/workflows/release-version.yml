@@ -1,0 +1,38 @@
+name: Check release version
+
+on:
+  workflow_call:
+    inputs:
+      tag_prefix:
+        required: true
+        type: string
+    outputs:
+      changed:
+        value: ${{ jobs.version.outputs.changed }}
+      version:
+        value: ${{ jobs.version.outputs.version }}
+      tag:
+        value: ${{ jobs.version.outputs.tag }}
+      prerelease:
+        value: ${{ jobs.version.outputs.prerelease }}
+      body:
+        value: ${{ jobs.version.outputs.body }}
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.meta.outputs.changed }}
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      body: ${{ steps.meta.outputs.body }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate version and prepare release notes
+        id: meta
+        env:
+          TAG_PREFIX: ${{ inputs.tag_prefix }}
+        run: python3 .github/scripts/release_meta.py

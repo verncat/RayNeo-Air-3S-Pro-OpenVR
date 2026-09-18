@@ -9,8 +9,19 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: steamvr-release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  version:
+    uses: ./.github/workflows/release-version.yml
+    with:
+      tag_prefix: steamvr-driver-
+
   build:
+    needs: version
+    if: needs.version.outputs.changed == 'true'
     name: Build OpenVR Driver (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -158,7 +169,7 @@ jobs:
   assemble:
     name: Assemble SteamVR Driver Zip
     runs-on: ubuntu-latest
-    needs: build
+    needs: [version, build]
     outputs:
       zip_name: ${{ steps.meta.outputs.zip_name }}
       tag: ${{ steps.meta.outputs.tag }}
@@ -182,13 +193,9 @@ jobs:
       - name: Compose names
         id: meta
         run: |
-          TS=$(date -u +%Y%m%d-%H%M%S)
-          SHORT_SHA=$(git rev-parse --short HEAD)
-          echo "ts=$TS" >> "$GITHUB_OUTPUT"
-          echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
-          echo "zip_name=steamvr_rayneo_driver-${TS}-${SHORT_SHA}.zip" >> "$GITHUB_OUTPUT"
-          echo "tag=steamvr-driver-${TS}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
-          echo "release_name=SteamVR Driver ${TS}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "zip_name=steamvr_rayneo_driver-${{ needs.version.outputs.version }}.zip" >> "$GITHUB_OUTPUT"
+          echo "tag=${{ needs.version.outputs.tag }}" >> "$GITHUB_OUTPUT"
+          echo "release_name=SteamVR Driver ${{ needs.version.outputs.version }}" >> "$GITHUB_OUTPUT"
 
       - name: Build combined driver zip
         run: |
@@ -261,7 +268,7 @@ jobs:
   release:
     name: Create SteamVR Driver Release
     runs-on: ubuntu-latest
-    needs: assemble
+    needs: [version, assemble]
     steps:
       - name: Download steamvr driver artifact
         uses: actions/download-artifact@v4
@@ -269,12 +276,17 @@ jobs:
           name: steamvr_rayneo_driver
           path: dist/steamvr_driver
 
+      - name: Create stable download alias
+        run: cp "dist/steamvr_driver/${{ needs.assemble.outputs.zip_name }}" dist/steamvr_driver/steamvr_rayneo_driver-latest.zip
+
       - name: Create SteamVR Driver Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.assemble.outputs.tag }}
           name: ${{ needs.assemble.outputs.release_name }}
-          body: SteamVR driver build from ${{ github.sha }} at ${{ needs.assemble.outputs.release_name }}
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
+          body: ${{ needs.version.outputs.body }}
           files: |
             dist/steamvr_driver/${{ needs.assemble.outputs.zip_name }}
             dist/steamvr_driver/steamvr_rayneo_driver-latest.zip
