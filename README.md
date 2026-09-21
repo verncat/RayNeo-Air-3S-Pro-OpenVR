@@ -23,6 +23,41 @@ The project currently focuses on:
 
 > NOTE: This repository is evolving. Some components (e.g. higher-level service logic, richer device info parsing, error reporting) are intentionally minimal.
 
+## Supported devices
+
+| Model | USB VID | USB PID | Support notes | Related issue / PR |
+| --- | --- | --- | --- | --- |
+| RayNeo Air 3S Pro | `0x1BBB` | `0xAF50` | Original SDK target; included in device discovery. | - |
+| RayNeo Air 4 Pro | `0x1BBB` | `0xAF50` | IMU streaming reported working by a user on macOS / Apple Silicon; discovered through the shared Air 3S Pro USB identity. | [#4: macOS compatibility report](https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR/issues/4) |
+| RayNeo GT | `0x3941` | `0xAF50` | Included in device discovery, with model-specific spatial-mode notification handling. | [PR #3: GT support and hardware testing](https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR/pull/3) |
+
+Air 3S Pro and Air 4 Pro share the same VID/PID, so discovery cannot distinguish
+them by these identifiers alone. The examples display both possible model names.
+The table describes SDK support, not a guarantee that every feature has been
+tested on every operating system.
+
+### Help test more devices
+
+Help us verify the models listed above and bring support to other RayNeo glasses!
+Reports from Windows, Linux, and macOS are welcome, whether everything works or
+you encounter a problem. Try `examples/simple` or `examples/orientation_demo`
+and [open an issue](https://github.com/verncat/RayNeo-Air-3S-Pro-OpenVR/issues)
+with:
+
+- Exact glasses model, firmware date/version, and board ID if available.
+- Operating system, CPU architecture, SDK version or commit, and build toolchain.
+- USB VID/PID and whether discovery finds the glasses or manual selection is needed.
+- Which features work: IMU streaming, device information, attach/detach events,
+  display mode switching, and button notifications. Mark untested features too.
+- Example output, API return codes, and steps or a small code sample to reproduce
+  any failure. If selecting an interface explicitly, include its number and the
+  return code from `Rayneo_SetTargetInterface`.
+
+For an unlisted USB identity, you can try selecting it explicitly with
+`Rayneo_SetTargetVidPid(ctx, vid, pid)` before `Rayneo_Start`, without using
+discovery. Successful reports help us expand the device table; unsuccessful
+reports help identify differences between models and platforms.
+
 ## Download prebuilt Binaries
 
 **SDK:**
