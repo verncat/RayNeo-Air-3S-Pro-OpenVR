@@ -10,6 +10,7 @@
 #include <thread>
 #include <string>
 #include "rayneo_api.h"
+#include "../device_name.h"
 
 #include <SDL.h>
 #include <SDL_opengl.h>
@@ -228,13 +229,46 @@ int main()
         printf("Create failed\n");
         return 1;
     }
-    Rayneo_SetTargetVidPid(ctx, 0x1BBB, 0xAF50);
+    // Alternatively, skip discovery and select the device before Rayneo_Start:
+    // Rayneo_SetTargetVidPid(ctx, RAYNEO_AIR_3S_PRO_VID, RAYNEO_AIR_3S_PRO_PID);
+    RAYNEO_VidPid devices[RAYNEO_SUPPORTED_DEVICE_COUNT]{};
+    size_t count = 0;
+    const auto discoveryRc = Rayneo_Discovery(devices, RAYNEO_SUPPORTED_DEVICE_COUNT, &count);
+    if (discoveryRc != RAYNEO_OK)
+    {
+        printf("Discovery failed: %s\n", Rayneo_ResultToString(discoveryRc));
+        Rayneo_Destroy(ctx);
+        return 1;
+    }
+    if (count == 0 || count > RAYNEO_SUPPORTED_DEVICE_COUNT)
+    {
+        printf("No supported glasses found, or discovery buffer is too small.\n");
+        Rayneo_Destroy(ctx);
+        return 1;
+    }
+    for (size_t i = 0; i < count; ++i)
+        printf("Found %s (VID:PID = %04X:%04X)\n", RayneoExampleDeviceName(devices[i]),
+               unsigned(devices[i].vid), unsigned(devices[i].pid));
+    if (count != 1)
+    {
+        printf("Multiple supported USB identities found. Connect only the glasses to use.\n");
+        Rayneo_Destroy(ctx);
+        return 1;
+    }
+    const auto target = devices[0];
+    const auto selectRc = Rayneo_SetTargetVidPid(ctx, target.vid, target.pid);
+    if (selectRc != RAYNEO_OK)
+    {
+        printf("Device selection failed: %s\n", Rayneo_ResultToString(selectRc));
+        Rayneo_Destroy(ctx);
+        return 1;
+    }
     auto startRc = Rayneo_Start(ctx, 0);
     if (startRc != RAYNEO_OK)
     {
         printf("Start failed: %d (%s). Possible reasons: device not connected, wrong VID/PID, libusb DLL missing, driver conflict.\n",
                startRc, Rayneo_ResultToString((RAYNEO_Result)startRc));
-        printf("Expected VID:PID = %04X:%04X\n", 0x1BBB, 0xAF50);
+        printf("Selected VID:PID = %04X:%04X\n", unsigned(target.vid), unsigned(target.pid));
         printf("Check that libusb-1.0.dll is present next to the EXE.\n");
 #ifndef __APPLE__
         // // Attempt to enumerate available USB devices for diagnostics

@@ -46,7 +46,7 @@ Old driver:
 
 Edit `RAYNEO_API_VERSION_MAJOR`, `RAYNEO_API_VERSION_MINOR`, and
 `RAYNEO_API_VERSION_PATCH` in `include/rayneo_api.h` to set the release SemVer
-(currently `1.3.0`). Use decimal integers without leading zeros. These three
+Use decimal integers without leading zeros. These three
 macros are the single source of the version; `RAYNEO_VERSION_STRING` is derived
 automatically. Major and minor must fit in 16 bits. `RAYNEO_API_VERSION` and
 `Rayneo_GetApiVersion()` retain the packed major/minor format for compatibility;
@@ -62,6 +62,32 @@ commits since the previous reachable tag for that product and a full diff link.
 Legacy timestamp tags are supported. Without a previous tag, all commits are
 included. The three numeric macros define stable releases without prerelease
 or build suffixes.
+
+## Device discovery
+
+`include/rayneo_api.h` defines per-model VID/PID macros and the shared
+`RAYNEO_SUPPORTED_DEVICES(X)` table. Add new supported models to that table.
+In C++, `Rayneo_GetSupportedDevices()` returns a constexpr `std::array` of
+`RAYNEO_VidPid` pairs. Discovery uses the same table:
+
+```cpp
+constexpr auto supported = Rayneo_GetSupportedDevices();
+RAYNEO_VidPid connected[RAYNEO_SUPPORTED_DEVICE_COUNT]{};
+size_t count = 0;
+RAYNEO_Result result = Rayneo_Discovery(connected, RAYNEO_SUPPORTED_DEVICE_COUNT, &count);
+if (result == RAYNEO_OK && count == 1) {
+    Rayneo_SetTargetVidPid(ctx, connected[0].vid, connected[0].pid);
+    Rayneo_Start(ctx, 0);
+}
+```
+
+Discovery returns unique connected VID/PID pairs in table order. It neither
+opens the devices nor changes a context. Zero matches returns `RAYNEO_OK` with
+count zero; USB enumeration failures return an error. Multiple identical devices
+share one entry. For multiple different matches, the application chooses a pair.
+`Rayneo_Discovery(NULL, 0, &count)` queries the count. With a smaller buffer,
+only `capacity` entries are written and `count` still reports the total.
+On macOS discovery enumerates HID devices; Windows/Linux use libusb.
 
 ## Repository Layout
 

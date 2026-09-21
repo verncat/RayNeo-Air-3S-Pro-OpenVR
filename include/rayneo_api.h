@@ -18,6 +18,37 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#ifdef __cplusplus
+#include <array>
+#endif
+
+#define RAYNEO_AIR_3S_PRO_VID 0x1BBB
+#define RAYNEO_AIR_3S_PRO_PID 0xAF50
+#define RAYNEO_GT_VID 0x3941
+#define RAYNEO_GT_PID 0xAF50
+
+// Add supported models here; discovery and the constexpr list share this table.
+#define RAYNEO_SUPPORTED_DEVICES(X) \
+    X(AIR_3S_PRO, RAYNEO_AIR_3S_PRO_VID, RAYNEO_AIR_3S_PRO_PID) \
+    X(GT, RAYNEO_GT_VID, RAYNEO_GT_PID)
+
+typedef struct RAYNEO_VidPid {
+    uint16_t vid;
+    uint16_t pid;
+} RAYNEO_VidPid;
+
+#define RAYNEO_COUNT_DEVICE(model, vid, pid) + 1
+enum { RAYNEO_SUPPORTED_DEVICE_COUNT = 0 RAYNEO_SUPPORTED_DEVICES(RAYNEO_COUNT_DEVICE) };
+#undef RAYNEO_COUNT_DEVICE
+
+#ifdef __cplusplus
+constexpr std::array<RAYNEO_VidPid, RAYNEO_SUPPORTED_DEVICE_COUNT> Rayneo_GetSupportedDevices()
+{
+#define RAYNEO_DEVICE_PAIR(model, vid, pid) {vid, pid},
+    return {{ RAYNEO_SUPPORTED_DEVICES(RAYNEO_DEVICE_PAIR) }};
+#undef RAYNEO_DEVICE_PAIR
+}
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,8 +59,9 @@ extern "C" {
 // Minor 1: added structured fields to RAYNEO_DeviceInfoMini (backward compatible: raw[] still first)
 // Minor 2: added RAYNEO_EVENT_NOTIFY (sleep/wake notifications) and notify union member
 // Minor 3: added Rayneo_SetTargetInterface and RAYNEO_NOTIFY_BUTTON_SPATIAL_MODE
-#define RAYNEO_API_VERSION_MINOR 3
-#define RAYNEO_API_VERSION_PATCH 0
+// Minor 4: supported device table and Rayneo_Discovery.
+#define RAYNEO_API_VERSION_MINOR 4
+#define RAYNEO_API_VERSION_PATCH 1
 
 #define RAYNEO_STRINGIFY_IMPL(value) #value
 #define RAYNEO_STRINGIFY(value) RAYNEO_STRINGIFY_IMPL(value)
@@ -153,6 +185,12 @@ typedef void (*RAYNEO_EventCallback)(const RAYNEO_Event* evt, void* user);
 RAYNEO_API const char* Rayneo_ResultToString(RAYNEO_Result r);
 
 // Lifecycle
+// Enumerate unique supported VID/PID pairs currently connected, without opening
+// a USB device or starting the service. outCount receives the total found.
+// Pass NULL/0 to query the count. At most capacity entries are written; if
+// outCount exceeds capacity, retry with a larger buffer. No devices is OK/0.
+// Discovery does not guarantee access permissions or select a device for Start.
+RAYNEO_API RAYNEO_Result Rayneo_Discovery(RAYNEO_VidPid* devices, size_t capacity, size_t* outCount);
 RAYNEO_API RAYNEO_Result Rayneo_Create(RAYNEO_Context* outCtx);
 RAYNEO_API void          Rayneo_Destroy(RAYNEO_Context ctx);
 

@@ -31,14 +31,19 @@ cd build/examples/simple/RelWithDebInfo
 ```
 
 ## Typical Flow
-1. Set VID/PID via `Rayneo_SetTargetVidPid(context, vid, pid)`.
-2. `Rayneo_Start(context)` to begin transport & event thread.
-3. Enable IMU streaming: `Rayneo_EnableImu(context, 1)`.
-4. Poll events with `Rayneo_PollEvent(context, &evt)` until program exit.
-5. `Rayneo_Stop(context)` then `Rayneo_DestroyContext(context)`.
+1. Discover supported USB identities with `Rayneo_Discovery(devices, capacity, &count)`.
+2. Select the single detected pair with `Rayneo_SetTargetVidPid(context, vid, pid)`.
+3. `Rayneo_Start(context, 0)` to begin transport and the event thread.
+4. Enable IMU streaming with `Rayneo_EnableImu(context)`.
+5. Poll events with `Rayneo_PollEvent(context, &evt, 500)` until program exit.
+6. `Rayneo_Stop(context)` then `Rayneo_Destroy(context)`.
 
-## Adjusting VID/PID
-Edit the example `main.cpp` and change the values passed to `Rayneo_SetTargetVidPid`. Discover them via:
+## Device selection
+Both examples discover supported VID/PID pairs automatically and print the matches.
+They exit with a diagnostic if discovery fails, no pair is found, or multiple
+different pairs are found. Connect only the glasses you want to use. Discovery
+groups identical VID/PID pairs and cannot distinguish two identical devices.
+Supported pairs are declared in `include/rayneo_api.h`. To identify a new pair:
 - Windows: Device Manager -> Properties -> Details -> Hardware Ids.
 - macOS: `system_profiler SPUSBDataType`.
 - Linux: `lsusb`.
