@@ -7,6 +7,7 @@
 #include <vector>
 #include <string>
 #include <condition_variable>
+#include <new>
 #include <chrono>
 #include <cstring>
 #include <cstdio>
@@ -35,6 +36,8 @@ struct RayneoContext__
     std::atomic<bool> running{false};
     RAYNEO_EventCallback cb{nullptr};
     void *cbUser{nullptr};
+    RAYNEO_RawFrameCallback rawCb{nullptr};
+    void *rawUser{nullptr};
     int logLevel{2};
     uint64_t seq{0};
     // Simple last snapshots
@@ -157,10 +160,18 @@ static constexpr uint8_t RAYNEO_GT_NOTIFY_SPATIAL_MODE = 0x08;
 
 static void enqueueEvent(RayneoContext__ *ctx, const RAYNEO_Event &evt);
 
+static uint64_t hostTimeNs()
+{
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
 static void processInboundFrame(RayneoContext__ *ctx, const uint8_t *buf, size_t len)
 {
     if (!ctx || !buf || len < 2)
         return;
+    if (ctx->rawCb && len >= 64)
+        ctx->rawCb(buf, hostTimeNs(), ctx->rawUser);
     if (len < 64 || buf[0] != 0x99)
     {
         return;
@@ -868,6 +879,17 @@ RAYNEO_Result Rayneo_SetEventCallback(RAYNEO_Context ctx, RAYNEO_EventCallback c
         return RAYNEO_ERR_BUSY;
     ctx->cb = cb;
     ctx->cbUser = user;
+    return RAYNEO_OK;
+}
+
+RAYNEO_Result Rayneo_SetRawFrameCallback(RAYNEO_Context ctx, RAYNEO_RawFrameCallback cb, void *user)
+{
+    if (!ctx)
+        return RAYNEO_ERR_INVALID_ARG;
+    if (ctx->running.load())
+        return RAYNEO_ERR_BUSY;
+    ctx->rawCb = cb;
+    ctx->rawUser = user;
     return RAYNEO_OK;
 }
 

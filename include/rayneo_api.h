@@ -6,7 +6,11 @@
 
 #pragma once
 
-#ifdef _WIN32
+// RAYNEO_STATIC: the SDK source is compiled into the third-party application itself
+// (no DLL, nothing exported or imported).
+#if defined(RAYNEO_STATIC)
+ #define RAYNEO_API
+#elif defined(_WIN32)
  #ifdef RAYNEO_BUILD
   #define RAYNEO_API __declspec(dllexport)
  #else
@@ -60,8 +64,9 @@ extern "C" {
 // Minor 2: added RAYNEO_EVENT_NOTIFY (sleep/wake notifications) and notify union member
 // Minor 3: added Rayneo_SetTargetInterface and RAYNEO_NOTIFY_BUTTON_SPATIAL_MODE
 // Minor 4: supported device table and Rayneo_Discovery.
-#define RAYNEO_API_VERSION_MINOR 4
-#define RAYNEO_API_VERSION_PATCH 1
+// Minor 5: Rayneo_SetRawFrameCallback (every received frame with its host receive time).
+#define RAYNEO_API_VERSION_MINOR 5
+#define RAYNEO_API_VERSION_PATCH 0
 
 #define RAYNEO_STRINGIFY_IMPL(value) #value
 #define RAYNEO_STRINGIFY(value) RAYNEO_STRINGIFY_IMPL(value)
@@ -181,6 +186,14 @@ typedef struct RAYNEO_Event {
 
 typedef void (*RAYNEO_EventCallback)(const RAYNEO_Event* evt, void* user);
 
+// Raw inbound frames (new in 1.5). Called for every 64-byte frame received from
+// the device, before it is decoded into events, on the SDK's receiving thread.
+// hostTimeNs: host receive time in nanoseconds on the steady (monotonic) clock,
+// the same clock as std::chrono::steady_clock. The frame is only valid during
+// the call. Keep the callback short and non-blocking (copy the frame and
+// return): the next frame is not received while it runs.
+typedef void (*RAYNEO_RawFrameCallback)(const uint8_t frame[64], uint64_t hostTimeNs, void* user);
+
 // Human-readable string for a result code.
 RAYNEO_API const char* Rayneo_ResultToString(RAYNEO_Result r);
 
@@ -199,6 +212,9 @@ RAYNEO_API RAYNEO_Result Rayneo_SetTargetVidPid(RAYNEO_Context ctx, uint16_t vid
 // Select a USB interface on libusb platforms. -1 keeps automatic selection.
 RAYNEO_API RAYNEO_Result Rayneo_SetTargetInterface(RAYNEO_Context ctx, int interfaceNumber);
 RAYNEO_API RAYNEO_Result Rayneo_SetEventCallback(RAYNEO_Context ctx, RAYNEO_EventCallback cb, void* user);
+// Raw frame callback (see RAYNEO_RawFrameCallback); NULL disables it. Independent
+// of the event callback / PollEvent. Returns RAYNEO_ERR_BUSY while started.
+RAYNEO_API RAYNEO_Result Rayneo_SetRawFrameCallback(RAYNEO_Context ctx, RAYNEO_RawFrameCallback cb, void* user);
 RAYNEO_API RAYNEO_Result Rayneo_SetLogLevel(int level); // global/simple; 0=errors .. 3=debug
 
 // Service control
