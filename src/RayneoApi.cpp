@@ -933,14 +933,20 @@ RAYNEO_Result Rayneo_Start(RAYNEO_Context ctx, uint32_t /*serviceFlags*/)
     }
     if (!target)
     {
-        // target not found
+        // target not found: release the libusb context too (Rayneo_Stop does
+        // nothing after a failed start, so it would stay open for good)
         libusb_free_device_list(list, 1);
+        libusb_exit(ctx->usbCtx);
+        ctx->usbCtx = nullptr;
         ctx->running.store(false);
         return RAYNEO_ERR_NO_DEVICE;
     }
     if (libusb_open(target, &ctx->handle) != 0 || !ctx->handle)
     {
         libusb_free_device_list(list, 1);
+        ctx->handle = nullptr;
+        libusb_exit(ctx->usbCtx);
+        ctx->usbCtx = nullptr;
         ctx->running.store(false);
         return RAYNEO_ERR_IO;
     }
