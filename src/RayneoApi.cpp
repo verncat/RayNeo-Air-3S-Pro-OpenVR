@@ -1020,6 +1020,14 @@ RAYNEO_Result Rayneo_Start(RAYNEO_Context ctx, uint32_t /*serviceFlags*/)
         {
             libusb_set_interface_alt_setting(ctx->handle, ctx->interfaceNumber, ctx->altSetting);
         }
+        // RayNeo GT: under Linux (seen in a VirtualBox VM) its interrupt OUT
+        // endpoint NAKed every write, so commands timed out, until it was cleared;
+        // CLEAR_FEATURE(ENDPOINT_HALT) re-arms it. On Windows' HID backend this
+        // only flushes the input queue.
+        if (cRc == 0 && ctx->epOut && ctx->vid == RAYNEO_GT_VID && ctx->pid == RAYNEO_GT_PID)
+        {
+            libusb_clear_halt(ctx->handle, ctx->epOut);
+        }
     }
 #else
     ctx->macReady = false;
