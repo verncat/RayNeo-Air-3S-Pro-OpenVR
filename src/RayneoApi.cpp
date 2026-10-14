@@ -1100,7 +1100,8 @@ RAYNEO_Result Rayneo_Start(RAYNEO_Context ctx, uint32_t /*serviceFlags*/)
             {
                 ctx->transferDone.store(false);
                 int r = libusb_submit_transfer(tr);
-                
+                if (r != 0)
+                    ctx->transferDone.store(true); // not in flight
             }
         };
         size_t inSize = ctx->epInMaxPacket ? ctx->epInMaxPacket : 64;
@@ -1115,7 +1116,8 @@ RAYNEO_Result Rayneo_Start(RAYNEO_Context ctx, uint32_t /*serviceFlags*/)
         ctx->transferDone.store(false);
         ctx->transferResubmit.store(true);
         int submitRc = libusb_submit_transfer(ctx->inTransfer);
-        (void)submitRc;
+        if (submitRc != 0)
+            ctx->transferDone.store(true); // not in flight
         ctx->worker = std::thread([ctx]() 
         {
             while (!ctx->stopWorker.load())
@@ -1151,6 +1153,9 @@ RAYNEO_Result Rayneo_Stop(RAYNEO_Context ctx)
     const bool debug = (std::getenv("RAYNEO_DEBUG_SHUTDOWN") != nullptr);
     if (was)
     {
+#ifndef __APPLE__
+        ctx->transferResubmit.store(false);
+#endif
         ctx->stopWorker.store(true);
 #ifndef __APPLE__
         // Cancel pending transfer to ensure worker loop wakes up immediately
@@ -1168,7 +1173,18 @@ RAYNEO_Result Rayneo_Stop(RAYNEO_Context ctx)
 #ifndef __APPLE__
         if (ctx->inTransfer)
         {
-            libusb_free_transfer(ctx->inTransfer);
+            // The callback may have resubmitted the transfer just after the cancel
+            // above (seen on Linux: libusb then aborted in libusb_close). Cancel
+            // again and handle events until its callback has run, so it is never
+            // freed while in flight.
+            for (int i = 0; i < 40 && !ctx->transferDone.load(); i++)
+            {
+                libusb_cancel_transfer(ctx->inTransfer);
+                timeval tv{0, 25000};
+                libusb_handle_events_timeout_completed(ctx->usbCtx, &tv, nullptr);
+            }
+            if (ctx->transferDone.load())
+                libusb_free_transfer(ctx->inTransfer); // else left allocated: freeing it in flight would crash
             ctx->inTransfer = nullptr;
         }
         if (ctx->handle && ctx->interfaceNumber >= 0)
