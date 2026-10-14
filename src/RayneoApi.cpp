@@ -1022,6 +1022,18 @@ RAYNEO_Result Rayneo_Start(RAYNEO_Context ctx, uint32_t /*serviceFlags*/)
         }
         
         int cRc = libusb_claim_interface(ctx->handle, ctx->interfaceNumber);
+        if (cRc != 0)
+        {
+            // The interface cannot be used (e.g. another program has claimed it):
+            // fail instead of reporting a connection that can neither send nor
+            // receive, and release what was opened.
+            libusb_close(ctx->handle);
+            ctx->handle = nullptr;
+            libusb_exit(ctx->usbCtx);
+            ctx->usbCtx = nullptr;
+            ctx->running.store(false);
+            return cRc == LIBUSB_ERROR_BUSY ? RAYNEO_ERR_BUSY : RAYNEO_ERR_IO;
+        }
         if (cRc == 0 && ctx->altSetting >= 0)
         {
             libusb_set_interface_alt_setting(ctx->handle, ctx->interfaceNumber, ctx->altSetting);
