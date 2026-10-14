@@ -1145,11 +1145,15 @@ RAYNEO_Result Rayneo_Stop(RAYNEO_Context ctx)
     // Prevent deadlock if Rayneo_Stop is called from the event callback (which runs on the worker thread)
     if (ctx->worker.joinable() && std::this_thread::get_id() == ctx->worker.get_id())
     {
-        ctx->stopIssued.store(true);
-        ctx->running.store(false);
+        // We cannot join() ourselves. Only ask the worker to end; the stop is not
+        // marked as done, so a later Rayneo_Stop or Rayneo_Destroy from another
+        // thread still joins the worker and releases everything (marking it done
+        // here made that call return at once, and Destroy then deleted a joinable
+        // thread: std::terminate).
+#ifndef __APPLE__
+        ctx->transferResubmit.store(false);
+#endif
         ctx->stopWorker.store(true);
-        // We cannot join() ourselves. The worker will exit its loop eventually since stopWorker is true,
-        // but we can't safely clean up resources here that the worker might still be using.
         return RAYNEO_ERR_BUSY;
     }
 
