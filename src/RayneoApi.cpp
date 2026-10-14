@@ -41,6 +41,7 @@ struct RayneoContext__
     int logLevel{2};
     uint64_t seq{0};
     // Simple last snapshots
+    std::mutex snapMtx; // guards lastImu and lastInfo (written by the receiving thread)
     RAYNEO_ImuSample lastImu{};
     RAYNEO_DeviceInfoMini lastInfo{};
     // Minimal event queue for PollEvent (single-producer single-consumer style)
@@ -221,7 +222,10 @@ static void processInboundFrame(RayneoContext__ *ctx, const uint8_t *buf, size_t
             sample.checksum = buf[57];
         for (int i = 0; i < 3; i++)
             sample.gyroRad[i] = sample.gyroDps[i] * 0.0174532925f;
-        ctx->lastImu = sample;
+        {
+            std::lock_guard<std::mutex> lk(ctx->snapMtx);
+            ctx->lastImu = sample;
+        }
         RAYNEO_Event evt{};
         evt.type = RAYNEO_EVENT_IMU_SAMPLE;
         evt.seq = ++ctx->seq;
@@ -391,8 +395,12 @@ static void processInboundFrame(RayneoContext__ *ctx, const uint8_t *buf, size_t
         info.max_volume = rdBp();
         info.support_panel_color_adjust = rdBp();
         info.flag = rdBp();
-        bool emit = (!ctx->lastInfo.valid) || (ctx->lastInfo.tick != info.tick);
-        ctx->lastInfo = info;
+        bool emit;
+        {
+            std::lock_guard<std::mutex> lk(ctx->snapMtx);
+            emit = (!ctx->lastInfo.valid) || (ctx->lastInfo.tick != info.tick);
+            ctx->lastInfo = info;
+        }
         if (emit)
         {
             RAYNEO_Event evt{};
@@ -1373,13 +1381,19 @@ RAYNEO_Result Rayneo_GetLastImu(RAYNEO_Context ctx, RAYNEO_ImuSample *out)
 {
     if (!ctx || !out)
         return RAYNEO_ERR_INVALID_ARG;
-    *out = ctx->lastImu;
+    {
+        std::lock_guard<std::mutex> lk(ctx->snapMtx);
+        *out = ctx->lastImu;
+    }
     return out->valid ? RAYNEO_OK : RAYNEO_ERR_TIMEOUT;
 }
 RAYNEO_Result Rayneo_GetDeviceInfo(RAYNEO_Context ctx, RAYNEO_DeviceInfoMini *out)
 {
     if (!ctx || !out)
         return RAYNEO_ERR_INVALID_ARG;
-    *out = ctx->lastInfo;
+    {
+        std::lock_guard<std::mutex> lk(ctx->snapMtx);
+        *out = ctx->lastInfo;
+    }
     return out->valid ? RAYNEO_OK : RAYNEO_ERR_TIMEOUT;
 }
