@@ -1097,7 +1097,9 @@ RAYNEO_Result Rayneo_Start(RAYNEO_Context ctx, uint32_t /*serviceFlags*/)
         };
         size_t inSize = ctx->epInMaxPacket ? ctx->epInMaxPacket : 64;
         if (inSize < 64) inSize = 64;
-        ctx->inBuffer.assign(inSize, 0);
+        // One spare byte: libusb's Windows HID backend counts the report ID byte
+        // it strips and copies one byte more than the report into the buffer.
+        ctx->inBuffer.assign(inSize + 1, 0);
         libusb_fill_interrupt_transfer(ctx->inTransfer, ctx->handle, ctx->epIn,
                                        ctx->inBuffer.data(), (int)inSize,
                                        transferCallback, ctx, 0);
@@ -1216,7 +1218,9 @@ RAYNEO_Result Rayneo_SendRaw(RAYNEO_Context ctx, const uint8_t frame[64])
     {
         rc = libusb_interrupt_transfer(ctx->handle, ctx->epOut, const_cast<uint8_t *>(frame), 64, &transferred, 500);
         
-        if (rc == 0 && transferred == 64)
+        // >= 64: libusb's Windows HID backend counts the report ID byte it adds
+        // (a complete write of the 64-byte frame reports 65).
+        if (rc == 0 && transferred >= 64)
             return RAYNEO_OK;
     }
     // Fallback control: SET_REPORT Output report ID 0
