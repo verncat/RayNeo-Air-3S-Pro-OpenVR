@@ -124,6 +124,40 @@ share one entry. For multiple different matches, the application chooses a pair.
 only `capacity` entries are written and `count` still reports the total.
 On macOS discovery enumerates HID devices; Windows/Linux use libusb.
 
+## Raw frames
+
+`Rayneo_SetRawFrameCallback` (call before `Rayneo_Start`) delivers every 64-byte
+frame received from the glasses, before it is decoded into events, together
+with its host receive time in nanoseconds on the steady clock
+(`std::chrono::steady_clock`). It is meant for applications that run their own
+processing on the raw sensor reports and need every report with an accurate
+arrival time. The callback runs on the SDK's receiving thread: copy the frame
+and return quickly. It works alongside the event callback or `Rayneo_PollEvent`.
+
+```cpp
+static void onRawFrame(const uint8_t frame[64], uint64_t hostTimeNs, void* user)
+{
+    // e.g. push {hostTimeNs, frame} into a lock-free queue for another thread
+}
+...
+Rayneo_SetRawFrameCallback(ctx, onRawFrame, &myQueue);
+Rayneo_Start(ctx, 0);
+```
+
+## Linux: access without root
+
+libusb needs write access to the glasses' USB device node. Instead of running
+as root, install the udev rule for your glasses once, then unplug and plug
+them in:
+
+```bash
+sudo cp udev/70-rayneo-gt.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+`udev/70-rayneo-gt.rules` grants the user logged in at the seat access to the
+RayNeo GT (3941:AF50).
+
 ## Repository Layout
 
 ```
@@ -135,6 +169,7 @@ examples/                     # Example apps
 openvr_driver/                # Optional stub driver
 rayneoSDKHeaders/             # Additional internal headers (not yet fully used) from original SDK
 thirdparties/openvr/          # Third-party OpenVR bits
+udev/                         # Linux udev rules (USB access without root)
 ```
 
 ## Building

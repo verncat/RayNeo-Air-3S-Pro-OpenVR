@@ -7,6 +7,7 @@
 #include <vector>
 #include <string>
 #include <condition_variable>
+#include <new>
 #include <chrono>
 #include <cstring>
 #include <cstdio>
@@ -35,6 +36,8 @@ struct RayneoContext__
     std::atomic<bool> running{false};
     RAYNEO_EventCallback cb{nullptr};
     void *cbUser{nullptr};
+    RAYNEO_RawFrameCallback rawCb{nullptr};
+    void *rawUser{nullptr};
     int logLevel{2};
     uint64_t seq{0};
     // Simple last snapshots
@@ -157,10 +160,18 @@ static constexpr uint8_t RAYNEO_GT_NOTIFY_SPATIAL_MODE = 0x08;
 
 static void enqueueEvent(RayneoContext__ *ctx, const RAYNEO_Event &evt);
 
+static uint64_t hostTimeNs()
+{
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
 static void processInboundFrame(RayneoContext__ *ctx, const uint8_t *buf, size_t len)
 {
     if (!ctx || !buf || len < 2)
         return;
+    if (ctx->rawCb && len >= 64)
+        ctx->rawCb(buf, hostTimeNs(), ctx->rawUser);
     if (len < 64 || buf[0] != 0x99)
     {
         return;
@@ -871,6 +882,17 @@ RAYNEO_Result Rayneo_SetEventCallback(RAYNEO_Context ctx, RAYNEO_EventCallback c
     return RAYNEO_OK;
 }
 
+RAYNEO_Result Rayneo_SetRawFrameCallback(RAYNEO_Context ctx, RAYNEO_RawFrameCallback cb, void *user)
+{
+    if (!ctx)
+        return RAYNEO_ERR_INVALID_ARG;
+    if (ctx->running.load())
+        return RAYNEO_ERR_BUSY;
+    ctx->rawCb = cb;
+    ctx->rawUser = user;
+    return RAYNEO_OK;
+}
+
 RAYNEO_Result Rayneo_SetLogLevel(int level)
 {
     (void)level; // global not stored yet
@@ -911,14 +933,20 @@ RAYNEO_Result Rayneo_Start(RAYNEO_Context ctx, uint32_t /*serviceFlags*/)
     }
     if (!target)
     {
-        // target not found
+        // target not found: release the libusb context too (Rayneo_Stop does
+        // nothing after a failed start, so it would stay open for good)
         libusb_free_device_list(list, 1);
+        libusb_exit(ctx->usbCtx);
+        ctx->usbCtx = nullptr;
         ctx->running.store(false);
         return RAYNEO_ERR_NO_DEVICE;
     }
     if (libusb_open(target, &ctx->handle) != 0 || !ctx->handle)
     {
         libusb_free_device_list(list, 1);
+        ctx->handle = nullptr;
+        libusb_exit(ctx->usbCtx);
+        ctx->usbCtx = nullptr;
         ctx->running.store(false);
         return RAYNEO_ERR_IO;
     }
@@ -998,6 +1026,14 @@ RAYNEO_Result Rayneo_Start(RAYNEO_Context ctx, uint32_t /*serviceFlags*/)
         {
             libusb_set_interface_alt_setting(ctx->handle, ctx->interfaceNumber, ctx->altSetting);
         }
+        // RayNeo GT: under Linux (seen in a VirtualBox VM) its interrupt OUT
+        // endpoint NAKed every write, so commands timed out, until it was cleared;
+        // CLEAR_FEATURE(ENDPOINT_HALT) re-arms it. On Windows' HID backend this
+        // only flushes the input queue.
+        if (cRc == 0 && ctx->epOut && ctx->vid == RAYNEO_GT_VID && ctx->pid == RAYNEO_GT_PID)
+        {
+            libusb_clear_halt(ctx->handle, ctx->epOut);
+        }
     }
 #else
     ctx->macReady = false;
@@ -1070,12 +1106,15 @@ RAYNEO_Result Rayneo_Start(RAYNEO_Context ctx, uint32_t /*serviceFlags*/)
             {
                 ctx->transferDone.store(false);
                 int r = libusb_submit_transfer(tr);
-                
+                if (r != 0)
+                    ctx->transferDone.store(true); // not in flight
             }
         };
         size_t inSize = ctx->epInMaxPacket ? ctx->epInMaxPacket : 64;
         if (inSize < 64) inSize = 64;
-        ctx->inBuffer.assign(inSize, 0);
+        // One spare byte: libusb's Windows HID backend counts the report ID byte
+        // it strips and copies one byte more than the report into the buffer.
+        ctx->inBuffer.assign(inSize + 1, 0);
         libusb_fill_interrupt_transfer(ctx->inTransfer, ctx->handle, ctx->epIn,
                                        ctx->inBuffer.data(), (int)inSize,
                                        transferCallback, ctx, 0);
@@ -1083,7 +1122,8 @@ RAYNEO_Result Rayneo_Start(RAYNEO_Context ctx, uint32_t /*serviceFlags*/)
         ctx->transferDone.store(false);
         ctx->transferResubmit.store(true);
         int submitRc = libusb_submit_transfer(ctx->inTransfer);
-        (void)submitRc;
+        if (submitRc != 0)
+            ctx->transferDone.store(true); // not in flight
         ctx->worker = std::thread([ctx]() 
         {
             while (!ctx->stopWorker.load())
@@ -1119,6 +1159,9 @@ RAYNEO_Result Rayneo_Stop(RAYNEO_Context ctx)
     const bool debug = (std::getenv("RAYNEO_DEBUG_SHUTDOWN") != nullptr);
     if (was)
     {
+#ifndef __APPLE__
+        ctx->transferResubmit.store(false);
+#endif
         ctx->stopWorker.store(true);
 #ifndef __APPLE__
         // Cancel pending transfer to ensure worker loop wakes up immediately
@@ -1136,7 +1179,18 @@ RAYNEO_Result Rayneo_Stop(RAYNEO_Context ctx)
 #ifndef __APPLE__
         if (ctx->inTransfer)
         {
-            libusb_free_transfer(ctx->inTransfer);
+            // The callback may have resubmitted the transfer just after the cancel
+            // above (seen on Linux: libusb then aborted in libusb_close). Cancel
+            // again and handle events until its callback has run, so it is never
+            // freed while in flight.
+            for (int i = 0; i < 40 && !ctx->transferDone.load(); i++)
+            {
+                libusb_cancel_transfer(ctx->inTransfer);
+                timeval tv{0, 25000};
+                libusb_handle_events_timeout_completed(ctx->usbCtx, &tv, nullptr);
+            }
+            if (ctx->transferDone.load())
+                libusb_free_transfer(ctx->inTransfer); // else left allocated: freeing it in flight would crash
             ctx->inTransfer = nullptr;
         }
         if (ctx->handle && ctx->interfaceNumber >= 0)
@@ -1194,7 +1248,9 @@ RAYNEO_Result Rayneo_SendRaw(RAYNEO_Context ctx, const uint8_t frame[64])
     {
         rc = libusb_interrupt_transfer(ctx->handle, ctx->epOut, const_cast<uint8_t *>(frame), 64, &transferred, 500);
         
-        if (rc == 0 && transferred == 64)
+        // >= 64: libusb's Windows HID backend counts the report ID byte it adds
+        // (a complete write of the 64-byte frame reports 65).
+        if (rc == 0 && transferred >= 64)
             return RAYNEO_OK;
     }
     // Fallback control: SET_REPORT Output report ID 0

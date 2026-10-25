@@ -1,0 +1,6 @@
+# RayNeo GT (USB 3941:AF50): read/write access for the user logged in at the
+# seat, so programs using this SDK (libusb) run without root.
+# Install: sudo cp 70-rayneo-gt.rules /etc/udev/rules.d/
+#          sudo udevadm control --reload-rules && sudo udevadm trigger
+# then unplug and plug in the glasses.
+SUBSYSTEM=="usb", ATTRS{idVendor}=="3941", ATTRS{idProduct}=="af50", TAG+="uaccess"
